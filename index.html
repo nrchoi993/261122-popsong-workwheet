@@ -6,9 +6,9 @@
   <!-- YouTube Error 153(참조자 누락) 방지 -->
   <meta name="referrer" content="strict-origin-when-cross-origin">
   <meta name="description" content="2022 개정 교육과정 언어 형식이 들어간 팝송을 찾고, 가사 빈칸·단어 활동지를 만들어 내려받는 교사용 도구">
-  <meta name="theme-color" content="#1f4e79">
+  <meta name="theme-color" content="#ffffff">
   <title>팝송 문법 활동지 생성기</title>
-  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='14' fill='%231f4e79'/%3E%3Cpath d='M26 44a6 6 0 1 1-4-5.66V16l20-4v24a6 6 0 1 1-4-5.66V18.9l-12 2.4z' fill='%23fff'/%3E%3C/svg%3E">
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='14' fill='%2315803d'/%3E%3Cpath d='M26 44a6 6 0 1 1-4-5.66V16l20-4v24a6 6 0 1 1-4-5.66V18.9l-12 2.4z' fill='%23fff'/%3E%3C/svg%3E">
   <link rel="preconnect" href="https://cdn.jsdelivr.net">
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/variable/pretendardvariable-dynamic-subset.min.css">
   <link rel="stylesheet" href="css/style.css">
@@ -98,8 +98,18 @@
     <section class="step" id="step1" aria-labelledby="s1Title">
       <div class="card">
         <div class="card-h"><h2 id="s1Title"><span class="sn">1</span>가르칠 표현 선택</h2></div>
+        <div class="pick-row">
+          <label class="field"><span>대분류 · 교육과정 [별표 4] 범주</span>
+            <select id="gCat"><option value="">— 범주를 고르세요 (40개) —</option></select></label>
+          <label class="field"><span>소분류 · 세부 표현</span>
+            <select id="gItem" disabled><option value="">먼저 대분류를 고르세요</option></select></label>
+          <label class="field"><span>적용 학년</span>
+            <select id="grade"></select></label>
+          <button type="button" class="btn primary lg" id="findBtn" disabled>영상 찾기 →</button>
+        </div>
+
         <div class="search-wrap">
-          <label for="gq" class="sr-only">표현 검색</label>
+          <label for="gq" class="s-label">또는 표현 이름으로 바로 찾기</label>
           <div class="search-box">
             <span class="s-ic" aria-hidden="true">🔍</span>
             <input id="gq" type="search" role="combobox" aria-expanded="false" aria-controls="gList" aria-autocomplete="list" autocomplete="off" placeholder="예: 수동태, to부정사, 현재완료, used to, 가정법, 관계대명사">
@@ -107,21 +117,8 @@
           </div>
           <ul id="gList" class="suggest" role="listbox" hidden></ul>
         </div>
-        <div class="quick" id="quickChips" aria-label="자주 쓰는 표현"></div>
-        <details class="browse" id="browse">
-          <summary>교육과정 [별표 4] 40개 범주에서 찾아보기</summary>
-          <div id="catList" class="cat-list"></div>
-        </details>
 
         <div id="selGrammar" class="sel-grammar" hidden></div>
-
-        <div class="s1-foot">
-          <label class="field inline">
-            <span>적용 학년</span>
-            <select id="grade"></select>
-          </label>
-          <button type="button" class="btn primary lg" id="findBtn" disabled>영상 찾기 →</button>
-        </div>
         <p class="muted small" id="s1Hint">표현을 고르면 그 표현이 들어간 곡의 YouTube 영상을 먼저 보여 드립니다. 활동지는 곡을 고른 다음에 만듭니다.</p>
       </div>
     </section>

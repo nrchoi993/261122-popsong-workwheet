@@ -180,7 +180,7 @@ function renderLineHTML(ws, line, mode, blanksByBase) {
     en = segs.map((s) => {
       if (s.kind === "blank") {
         const b = s.blank;
-        const w = Math.max(4.5, Math.min(9, b.answer.length * 0.55 + 2.2));
+        const w = Math.max(6, Math.min(11, b.answer.length * 0.7 + 3.5)); // 학생이 쓸 공간을 넉넉히
         if (mode === "answer") return `<span class="blank ans"><span class="bn">${b.num})</span><span class="bw">${esc(b.answer)}</span></span>`;
         if (mode === "edit") return `<span class="blank edit" data-blank="${b.id}" title="클릭하면 빈칸 해제"><span class="bn">${b.num})</span><span class="bu" style="width:${w}em">${esc(b.answer)}</span></span>`;
         return `<span class="blank"><span class="bn">${b.num})</span><span class="bu" style="width:${w}em"></span></span>`;
@@ -252,17 +252,25 @@ function vocabTableHTML(ws, answer) {
     const mCls = answer && it.show === "word" ? "m a" : "m";
     return `<td class="n">${it.num}</td><td class="${wCls}">${pos}${w}</td><td class="${mCls}">${m}</td>`;
   };
-  return `<table class="ws-vocab"><thead><tr>${'<th class="n"></th><th>단어</th><th>뜻</th>'.repeat(3)}</tr></thead><tbody>
+  const cols = '<col style="width:4.6%"><col style="width:13.4%"><col style="width:15.3%">'.repeat(3);
+  return `<table class="ws-vocab"><colgroup>${cols}</colgroup><thead><tr>${'<th class="n"></th><th>단어</th><th>뜻</th>'.repeat(3)}</tr></thead><tbody>
     ${rows.map((r) => `<tr>${r.map(cell).join("")}</tr>`).join("")}
   </tbody></table>`;
+}
+
+function halves(arr) {
+  const h = Math.ceil(arr.length / 2);
+  return [arr.slice(0, h), arr.slice(h)];
 }
 
 function gameHTML(ws, game, answer) {
   if (game.type === "wordsearch") {
     const ans = new Set(game.answerCells);
     const grid = game.grid.map((row, r) => `<tr>${row.map((ch, c) => `<td class="${answer && ans.has(r + "," + c) ? "on" : ""}">${ch}</td>`).join("")}</tr>`).join("");
-    const words = game.words.map((w) => `<span class="chip">${esc(w.display)}</span>`).join("");
-    return `<div class="g-ws"><table class="ws-grid" style="--n:${game.size}"><tbody>${grid}</tbody></table><div class="g-words"><b>찾을 단어 (${game.words.length})</b><div>${words}</div></div></div>`;
+    const words = game.words.map((w) => `<span class="chip"><small>${w.num}</small> ${esc(w.display)}</span>`).join("");
+    const skip = game.skipped && game.skipped.length ? `<div class="g-skip">※ 너무 길어 표에 넣지 못한 단어: ${game.skipped.map(esc).join(", ")}</div>` : "";
+    const cell = game.size > 13 ? 6.4 : 7.2;
+    return `<div class="g-ws"><table class="ws-grid" style="--cell:${cell}mm"><tbody>${grid}</tbody></table><div class="g-words"><b>찾을 단어 (${game.words.length})</b><div>${words}</div>${skip}</div></div>`;
   }
   if (game.type === "secret") {
     const key = "ABCDEFGHIJKLMNOPQRSTUVWXYZ".split("");
@@ -270,14 +278,17 @@ function gameHTML(ws, game, answer) {
       <tr>${key.slice(0, 13).map((k) => `<th>${k}</th>`).join("")}</tr><tr>${key.slice(0, 13).map((k, i) => `<td>${i + 1}</td>`).join("")}</tr>
       <tr>${key.slice(13).map((k) => `<th>${k}</th>`).join("")}</tr><tr>${key.slice(13).map((k, i) => `<td>${i + 14}</td>`).join("")}</tr>
     </tbody></table>`;
-    const easy = game.easy.map((e, i) => `<div class="code-item"><span class="ci-n">${i + 1}.</span> <span class="ci-m">${esc(e.meaning || "")}</span> <span class="ci-c">${e.code.join("-")}</span> ➡ <span class="ci-a">${answer ? esc(e.word) : e.word.split("").map(() => "_").join(" ")}</span></div>`).join("");
-    const hard = game.hard.map((h, i) => `<div class="code-item hard"><span class="ci-n">${i + 1}.</span> ${h.words.map((w) => `<span class="ci-c">( ${w.code.join("-")} )</span>`).join(" ")}<div class="ci-a">➡ ${answer ? esc(h.phrase.toUpperCase()) : h.words.map((w) => w.word.split("").map(() => "_").join(" ")).join("&nbsp;&nbsp;&nbsp;")}</div></div>`).join("");
-    return `<div class="g-secret"><div class="sub">[ Secret Code Key ]</div>${keyTable}<div class="sub">[ EASY ]</div>${easy}${hard ? `<div class="sub">[ HARD ] 가사 속 구절</div>${hard}` : ""}</div>`;
+    const item = (e) => `<div class="code-item"><span class="ci-n">${e.num}.</span> <span class="ci-c">${e.code.join("-")}</span><div class="ci-a">➡ ${answer ? `<b>${esc(e.word)}</b>` : e.word.split("").map(() => "<span class='sl'></span>").join("")}${e.meaning ? ` <span class="ci-m">(${esc(e.meaning)})</span>` : ""}</div></div>`;
+    const [a, b] = halves(game.easy);
+    const hard = game.hard.map((h, i) => `<div class="code-item hard"><span class="ci-n">${i + 1}.</span> ${h.words.map((w) => `<span class="ci-c">( ${w.code.join("-")} )</span>`).join(" ")}<div class="ci-a">➡ ${answer ? `<b>${esc(h.phrase.toUpperCase())}</b>` : h.words.map((w) => w.word.split("").map(() => "<span class='sl'></span>").join("")).join("<span class='gap'></span>")}</div></div>`).join("");
+    return `<div class="g-secret">${keyTable}<div class="sub">[ 단어 ] 번호는 가사 빈칸 번호와 같습니다.</div><div class="two-col"><div>${a.map(item).join("")}</div><div>${b.map(item).join("")}</div></div>${hard ? `<div class="sub">[ 도전 ] 가사 속 구절</div>${hard}` : ""}</div>`;
   }
-  if (game.type === "missing") {
-    return `<table class="ws-list"><thead><tr><th>No.</th><th>단어</th><th>뜻</th><th>빠진 철자</th></tr></thead><tbody>${game.items.map((it, i) => `<tr><td>${i + 1}</td><td class="mono">${answer ? esc(it.word) : esc(it.shown)}</td><td>${esc(it.meaning || "")}</td><td class="c">${answer ? it.missing : "[&nbsp;&nbsp;&nbsp;]"}</td></tr>`).join("")}</tbody></table>`;
-  }
-  return `<table class="ws-list"><thead><tr><th>No.</th><th>섞인 철자</th><th>뜻</th><th>정답</th></tr></thead><tbody>${game.items.map((it, i) => `<tr><td>${i + 1}</td><td class="mono">${esc(it.shuffled)}</td><td>${esc(it.meaning || "")}</td><td>${answer ? esc(it.word) : ""}</td></tr>`).join("")}</tbody></table>`;
+  const isMissing = game.type === "missing";
+  const head = `<thead><tr><th class="n">No</th><th>${isMissing ? "단어" : "섞인 철자"}</th><th>뜻</th><th class="w">${isMissing ? "빠진 철자" : "정답"}</th></tr></thead>`;
+  const row = (it) => `<tr><td class="n">${it.num}</td><td class="mono">${isMissing ? (answer ? esc(it.word) : esc(it.shown)) : esc(it.shuffled)}</td><td>${esc(it.meaning || "")}</td><td class="w${answer ? " a" : ""}">${answer ? esc(isMissing ? it.missing : it.word) : ""}</td></tr>`;
+  const [a, b] = halves(game.items);
+  const tbl = (rows) => `<table class="ws-list"><colgroup><col style="width:9%"><col style="width:36%"><col style="width:25%"><col></colgroup>${head}<tbody>${rows.map(row).join("")}</tbody></table>`;
+  return `<div class="two-col">${tbl(a)}${b.length ? tbl(b) : "<div></div>"}</div>`;
 }
 
 export function renderPage2(ws) {
@@ -317,107 +328,6 @@ export function renderAnswerPages(ws) {
 
 export function renderAllPages(ws, qr) {
   return renderPage1(ws, { qr }) + renderPage2(ws) + renderAnswerPages(ws);
-}
-
-/* ===================== 온라인 정답 확인 ===================== */
-
-export function renderOnline(ws) {
-  const map = blanksMap(ws);
-  const lines = ws.lines.map((line) => {
-    if (line.type === "break") return '<div class="ol-break"></div>';
-    if (line.type === "label") return `<div class="ol-label">${esc(line.en)}</div>`;
-    if (line.type === "repeat") return `<div class="ol-repeat">${esc(line.en)}</div>`;
-    const blanks = map.get(line.base) || [];
-    const segs = segmentLine(line.en || "", blanks, highlightsFor(ws, line));
-    const en = segs.map((s) => {
-      if (s.kind === "blank") {
-        const b = s.blank;
-        const size = Math.max(4, Math.min(16, b.answer.length + 1));
-        return `<label class="ol-blank"><span class="bn">${b.num}</span><input type="text" inputmode="latin" autocomplete="off" autocapitalize="off" spellcheck="false" data-num="${b.num}" data-answer="${esc(b.answer)}" style="width:${size + 1.5}ch" aria-label="${b.num}번 빈칸"></label>`;
-      }
-      return s.kind === "hl" ? `<span class="hl">${esc(s.text)}</span>` : esc(s.text);
-    }).join("");
-    const ko = ws.options.translation && line.ko ? `<div class="ol-ko">${esc(line.ko)}</div>` : "";
-    return `<div class="ol-line"><div class="ol-en">${en}</div>${ko}</div>`;
-  }).join("");
-
-  const rows = vocabCheckRows(ws).map((it) => {
-    const askWord = it.show === "meaning";
-    const prompt = askWord ? `<span class="vq-m">${esc(it.meaning)}</span>` : `<span class="vq-w">${esc(it.head)}</span>${it.pos ? ` <span class="pos">${esc(it.pos)}</span>` : ""}`;
-    const answer = askWord ? it.head : it.meaning;
-    return `<div class="vq"><span class="vq-n">${it.num}</span><div class="vq-p">${prompt}</div><input type="text" autocomplete="off" spellcheck="false" data-kind="${askWord ? "word" : "meaning"}" data-answer="${esc(answer || "")}" placeholder="${askWord ? "단어" : "뜻"}"><span class="vq-r" aria-live="polite"></span></div>`;
-  }).join("");
-
-  return `<div class="online">
-    <div class="ol-toolbar">
-      <button type="button" class="btn primary" data-ol="check">채점하기</button>
-      <button type="button" class="btn" data-ol="reveal">정답 보기</button>
-      <button type="button" class="btn ghost" data-ol="reset">다시 풀기</button>
-      <span class="ol-score" aria-live="polite"></span>
-    </div>
-    <h3 class="ol-h">가사 빈칸</h3>
-    <div class="ol-lyrics">${lines}</div>
-    <h3 class="ol-h">Part 1. Vocabulary Check</h3>
-    <p class="muted small">뜻 문항은 자동 채점이 어려워 정답과 비교해 직접 확인하도록 표시합니다.</p>
-    <div class="ol-vocab">${rows}</div>
-  </div>`;
-}
-
-function normAns(s) {
-  return String(s || "").toLowerCase().replace(/[’‘`]/g, "'").replace(/[^a-z가-힣']/g, "");
-}
-
-export function gradeOnline(root) {
-  let correct = 0, total = 0;
-  root.querySelectorAll(".ol-blank input").forEach((inp) => {
-    total++;
-    const ok = normAns(inp.value) === normAns(inp.dataset.answer);
-    inp.classList.toggle("ok", ok);
-    inp.classList.toggle("ng", !ok);
-    if (ok) correct++;
-  });
-  let vOk = 0, vTotal = 0, vCheck = 0;
-  root.querySelectorAll(".ol-vocab input").forEach((inp) => {
-    const r = inp.parentElement.querySelector(".vq-r");
-    const ans = inp.dataset.answer || "";
-    if (!ans) { r.textContent = ""; return; }
-    vTotal++;
-    if (!inp.value.trim()) {
-      inp.classList.remove("ok", "check"); inp.classList.add("ng");
-      r.textContent = "정답: " + ans;
-      return;
-    }
-    if (inp.dataset.kind === "word") {
-      const ok = normAns(inp.value) === normAns(ans);
-      inp.classList.toggle("ok", ok); inp.classList.toggle("ng", !ok);
-      r.textContent = ok ? "정답" : "정답: " + ans;
-      if (ok) vOk++;
-    } else {
-      const v = normAns(inp.value);
-      const parts = ans.split(/[,，/]/).map((p) => normAns(p.replace(/\(.*?\)/g, ""))).filter(Boolean);
-      const ok = !!v && parts.some((p) => p === v || (v.length >= 2 && (p.includes(v) || v.includes(p))));
-      inp.classList.toggle("ok", ok); inp.classList.toggle("ng", false); inp.classList.toggle("check", !ok);
-      r.textContent = ok ? "정답" : "확인: " + ans;
-      if (ok) vOk++; else vCheck++;
-    }
-  });
-  return { correct, total, vOk, vTotal, vCheck };
-}
-
-export function revealOnline(root) {
-  root.querySelectorAll(".ol-blank input, .ol-vocab input").forEach((inp) => {
-    inp.value = inp.dataset.answer || "";
-    inp.classList.remove("ng", "check");
-    inp.classList.add("revealed");
-  });
-}
-
-export function resetOnline(root) {
-  root.querySelectorAll(".ol-blank input, .ol-vocab input").forEach((inp) => {
-    inp.value = "";
-    inp.classList.remove("ok", "ng", "check", "revealed");
-  });
-  root.querySelectorAll(".vq-r").forEach((r) => { r.textContent = ""; });
 }
 
 export function grammarSummary(ws) {

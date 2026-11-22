@@ -31,45 +31,54 @@ export function buildGame(type, vocab, opts = {}) {
 }
 
 function wordSearch(vocab, rand, opts) {
-  let words = vocab.map((v) => ({ num: v.num, word: letters(v.head || v.answer), meaning: v.meaning, display: v.head || v.answer }))
-    .filter((w) => w.word.length >= 3 && w.word.length <= 12);
+  // 모든 빈칸 단어를 넣습니다(같은 철자는 한 번만). 다 들어가지 않으면 표를 키워 다시 배치합니다.
   const seen = new Set();
-  words = words.filter((w) => !seen.has(w.word) && seen.add(w.word)).slice(0, 12);
-  const longest = Math.max(8, ...words.map((w) => w.word.length));
-  const size = Math.min(14, Math.max(10, longest + 2));
-  const grid = Array.from({ length: size }, () => Array(size).fill(""));
+  const all = vocab.map((v) => ({ num: v.num, word: letters(v.head || v.answer), meaning: v.meaning, display: v.head || v.answer })).filter((w) => w.word.length >= 1);
+  // 같은 철자는 표에 한 번만 숨기고, 목록에는 번호별로 모두 표시
+  const words = all.filter((w) => !seen.has(w.word) && seen.add(w.word));
+  const usable = words.filter((w) => w.word.length <= 16);
+  const longest = Math.max(8, ...usable.map((w) => w.word.length));
   const dirs = opts.hard ? [[0, 1], [1, 0], [1, 1], [-1, 1], [0, -1], [1, -1]] : [[0, 1], [1, 0], [1, 1], [-1, 1]];
-  const placed = [];
-  const sorted = words.slice().sort((a, b) => b.word.length - a.word.length);
-  sorted.forEach((w) => {
-    for (let tries = 0; tries < 300; tries++) {
-      const [dr, dc] = dirs[Math.floor(rand() * dirs.length)];
-      const r0 = Math.floor(rand() * size);
-      const c0 = Math.floor(rand() * size);
-      const rEnd = r0 + dr * (w.word.length - 1);
-      const cEnd = c0 + dc * (w.word.length - 1);
-      if (rEnd < 0 || rEnd >= size || cEnd < 0 || cEnd >= size) continue;
-      let ok = true;
-      for (let k = 0; k < w.word.length; k++) {
-        const ch = grid[r0 + dr * k][c0 + dc * k];
-        if (ch && ch !== w.word[k]) { ok = false; break; }
+  let best = null;
+  const startSize = Math.min(16, Math.max(10, longest + 1, Math.ceil(Math.sqrt(usable.reduce((a, w) => a + w.word.length, 0) * 1.9))));
+  for (let size = startSize; size <= 16; size++) {
+    for (let attempt = 0; attempt < 6; attempt++) {
+      const grid = Array.from({ length: size }, () => Array(size).fill(""));
+      const placed = [];
+      const sorted = usable.slice().sort((a, b) => b.word.length - a.word.length);
+      for (const w of sorted) {
+        let ok = false;
+        for (let tries = 0; tries < 400 && !ok; tries++) {
+          const [dr, dc] = dirs[Math.floor(rand() * dirs.length)];
+          const r0 = Math.floor(rand() * size), c0 = Math.floor(rand() * size);
+          const rEnd = r0 + dr * (w.word.length - 1), cEnd = c0 + dc * (w.word.length - 1);
+          if (rEnd < 0 || rEnd >= size || cEnd < 0 || cEnd >= size) continue;
+          let fit = true;
+          for (let k = 0; k < w.word.length; k++) {
+            const ch = grid[r0 + dr * k][c0 + dc * k];
+            if (ch && ch !== w.word[k]) { fit = false; break; }
+          }
+          if (!fit) continue;
+          const cells = [];
+          for (let k = 0; k < w.word.length; k++) { grid[r0 + dr * k][c0 + dc * k] = w.word[k]; cells.push([r0 + dr * k, c0 + dc * k]); }
+          placed.push({ ...w, cells });
+          ok = true;
+        }
       }
-      if (!ok) continue;
-      const cells = [];
-      for (let k = 0; k < w.word.length; k++) {
-        grid[r0 + dr * k][c0 + dc * k] = w.word[k];
-        cells.push([r0 + dr * k, c0 + dc * k]);
-      }
-      placed.push({ ...w, cells });
-      return;
+      if (!best || placed.length > best.placed.length) best = { size, grid, placed };
+      if (placed.length === usable.length) break;
     }
-  });
+    if (best.placed.length === usable.length) break;
+  }
+  const { size, grid, placed } = best;
   const answerCells = new Set();
   placed.forEach((p) => p.cells.forEach(([r, c]) => answerCells.add(r + "," + c)));
   const ALPHA = "ABCDEFGHIJKLMNOPRSTUWY";
   for (let r = 0; r < size; r++) for (let c = 0; c < size; c++) if (!grid[r][c]) grid[r][c] = ALPHA[Math.floor(rand() * ALPHA.length)];
-  const order = placed.slice().sort((a, b) => a.num - b.num);
-  return { type: "wordsearch", size, grid, words: order, answerCells: Array.from(answerCells) };
+  const cellsOf = new Map(placed.map((p) => [p.word, p.cells]));
+  const order = all.filter((w) => cellsOf.has(w.word)).map((w) => ({ ...w, cells: cellsOf.get(w.word) }));
+  const skipped = all.filter((w) => !cellsOf.has(w.word)).map((w) => w.display);
+  return { type: "wordsearch", size, grid, words: order, answerCells: Array.from(answerCells), skipped };
 }
 
 function encode(word) {
@@ -77,9 +86,9 @@ function encode(word) {
 }
 
 function secretCode(vocab, rand, opts) {
-  const pool = vocab.filter((v) => { const n = letters(v.head || v.answer).length; return n >= 3 && n <= 10; });
-  const easy = pool.slice().sort(() => rand() - 0.5).slice(0, 6).sort((a, b) => a.num - b.num).map((v) => ({
-    word: letters(v.head || v.answer), display: v.head || v.answer, meaning: v.meaning, code: encode(v.head || v.answer),
+  // 모든 빈칸 단어(번호 그대로)
+  const easy = vocab.filter((v) => letters(v.head || v.answer).length >= 1).map((v) => ({
+    num: v.num, word: letters(v.head || v.answer), display: v.head || v.answer, meaning: v.meaning, code: encode(v.head || v.answer),
   }));
   const hard = (opts.phrases || []).slice(0, 2).map((p) => ({
     phrase: p.text,
@@ -90,10 +99,10 @@ function secretCode(vocab, rand, opts) {
 }
 
 function missingLetters(vocab, rand) {
-  const items = vocab.filter((v) => letters(v.head || v.answer).length >= 3).slice(0, 14).map((v) => {
+  const items = vocab.filter((v) => letters(v.head || v.answer).length >= 1).map((v) => {
     const word = String(v.head || v.answer);
     const idxs = [];
-    for (let i = 0; i < word.length; i++) if (/[A-Za-z]/.test(word[i]) && (i > 0 || word.length <= 3)) idxs.push(i);
+    for (let i = 0; i < word.length; i++) if (/[A-Za-z]/.test(word[i]) && (i > 0 || word.length <= 2)) idxs.push(i);
     const pick = idxs[Math.floor(rand() * idxs.length)];
     const shown = word.split("").map((ch, i) => (i === pick ? "_" : ch)).join(" ");
     return { num: v.num, word, shown, missing: word[pick].toUpperCase(), meaning: v.meaning };
@@ -115,7 +124,7 @@ function shuffleWord(word, rand) {
 }
 
 function scramble(vocab, rand) {
-  const items = vocab.filter((v) => letters(v.head || v.answer).length >= 3).slice(0, 15).map((v) => ({
+  const items = vocab.filter((v) => letters(v.head || v.answer).length >= 1).map((v) => ({
     num: v.num, word: v.head || v.answer, shuffled: shuffleWord(v.head || v.answer, rand), meaning: v.meaning,
   }));
   return { type: "scramble", items };

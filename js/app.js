@@ -10,8 +10,9 @@ import { resolveVideos, mountPlayer, parseYouTubeId, watchUrl, searchUrl, thumbU
 import { parseLyrics, collapseRepeats } from "./lyrics.js";
 import {
   createWorksheet, computeLines, setBlanks, syncBlankIds, fillAutoBlanks, visibleBlanks, addBlank, removeBlank,
-  renderPage1, renderPage2, renderAnswerPages, renderAllPages, renderOnline, gradeOnline, revealOnline, resetOnline, esc, grammarSummary,
+  renderPage1, renderPage2, renderAnswerPages, renderAllPages, esc, grammarSummary,
 } from "./worksheet.js";
+import { renderOnline, bindOnline } from "./online.js";
 import { $, $$, showLoading, hideLoading, setLoadingStep, toast, qrDataUrl } from "./ui.js";
 
 const WORK_KEY = "popsong.work.v2";
@@ -196,22 +197,22 @@ function unlock(n) { app.maxStep = Math.max(app.maxStep, n); }
 
 /* =================== 1단계: 표현 선택 =================== */
 
-const QUICK = ["pass_basic", "inf_noun", "perf_present", "rel_subject_object", "subj_past", "caus_make_let_have", "ger_object", "comp_er", "modal_used_to", "cond_if", "indirect_question", "cl_imperative"];
-
 function initStep1() {
   $("#grade").innerHTML = '<option value="">자동 (권장 학교급 기준)</option>' + GRADES.map((g) => `<option>${g}</option>`).join("");
   $("#grade").addEventListener("change", (e) => { app.grade = e.target.value; });
-  $("#quickChips").innerHTML = '<span class="muted small" style="align-self:center">자주 찾는 표현:</span>' + QUICK.map((id) => {
-    const g = getGrammar(id);
-    return `<button type="button" class="chip-btn" data-gid="${id}">${esc(g.label.split(" (")[0].replace(/\s*\(.*$/, ""))}</button>`;
-  }).join("");
-  $("#quickChips").addEventListener("click", (e) => { const b = e.target.closest("[data-gid]"); if (b) selectGrammar(getGrammar(b.dataset.gid)); });
 
-  $("#catList").innerHTML = CATEGORIES.map((c) => {
-    const items = GRAMMAR_ITEMS.filter((g) => g.cat === c.no);
-    return `<div class="cat"><h4>${c.no}. ${esc(c.ko)} <small>${esc(c.en)}</small></h4><div class="items">${items.map((g) => `<button type="button" class="chip-btn" data-gid="${g.id}" title="${esc(g.form)}">${esc(g.label)}</button>`).join("")}</div></div>`;
-  }).join("");
-  $("#catList").addEventListener("click", (e) => { const b = e.target.closest("[data-gid]"); if (b) { selectGrammar(getGrammar(b.dataset.gid)); $("#browse").open = false; } });
+  // 대분류·소분류 드롭다운
+  const cat = $("#gCat");
+  const itemSel = $("#gItem");
+  cat.innerHTML = '<option value="">— 범주를 고르세요 (40개) —</option>' + CATEGORIES.map((c) => `<option value="${c.no}">${c.no}. ${esc(c.ko)} (${esc(c.en)})</option>`).join("");
+  cat.addEventListener("change", () => {
+    fillItemSelect(Number(cat.value));
+    if (!cat.value) { clearGrammar(); return; }
+    const items = GRAMMAR_ITEMS.filter((g) => g.cat === Number(cat.value));
+    if (items.length === 1) { itemSel.value = items[0].id; selectGrammar(items[0]); }
+    else { clearGrammar(true); itemSel.focus(); }
+  });
+  itemSel.addEventListener("change", () => { if (itemSel.value) selectGrammar(getGrammar(itemSel.value)); else clearGrammar(true); });
 
   const q = $("#gq");
   const list = $("#gList");
@@ -261,6 +262,22 @@ function initStep1() {
   $("#findBtn").addEventListener("click", findSongs);
 }
 
+function fillItemSelect(catNo) {
+  const sel = $("#gItem");
+  if (!catNo) { sel.innerHTML = '<option value="">먼저 대분류를 고르세요</option>'; sel.disabled = true; return; }
+  const items = GRAMMAR_ITEMS.filter((g) => g.cat === catNo);
+  sel.innerHTML = '<option value="">— 세부 표현 선택 (' + items.length + '개) —</option>' +
+    items.map((g) => `<option value="${g.id}">${esc(g.label)} · ${esc(g.form)} [${g.level}]</option>`).join("");
+  sel.disabled = false;
+}
+
+function clearGrammar(keepCat) {
+  app.grammar = null;
+  $("#selGrammar").hidden = true;
+  $("#findBtn").disabled = true;
+  if (!keepCat) { $("#gCat").value = ""; fillItemSelect(0); }
+}
+
 function selectGrammar(g) {
   if (!g) return;
   app.grammar = g;
@@ -272,15 +289,37 @@ function selectGrammar(g) {
     <div class="sg-cat">${c ? `[별표 4] ${c.no}. ${esc(c.ko)} (${esc(c.en)})${g.ext ? " · 수업용 확장 항목" : ""}` : "교육과정 목록 밖의 표현 — AI가 해석해 곡을 찾습니다."}</div>
     ${g.example ? `<div class="sg-ex">교육과정 예문: <i>${esc(g.example)}</i></div>` : ""}
     <button type="button" class="icon-btn" aria-label="선택 해제" id="unsel">×</button>`;
-  $("#unsel").onclick = () => { app.grammar = null; box.hidden = true; $("#findBtn").disabled = true; $$(".chip-btn.on").forEach((b) => b.classList.remove("on")); };
-  $$(".chip-btn[data-gid]").forEach((b) => b.classList.toggle("on", b.dataset.gid === g.id));
+  $("#unsel").onclick = () => { $("#gCat").value = ""; fillItemSelect(0); clearGrammar(); };
+  if (!g.custom) {
+    $("#gCat").value = String(g.cat);
+    fillItemSelect(g.cat);
+    $("#gItem").value = g.id;
+  } else {
+    $("#gCat").value = "";
+    fillItemSelect(0);
+  }
   $("#findBtn").disabled = false;
   $("#gq").value = "";
   $("#gClear").hidden = true;
-  setTimeout(() => $("#findBtn").focus({ preventScroll: true }), 0);
 }
 
 /* =================== 2단계: 영상 고르기 =================== */
+
+/** 네이버 가사 검색용: 악센트 제거(Beyoncé → Beyonce), feat./괄호 정보 제거 */
+function plainForKorea(s) {
+  return String(s || "")
+    .normalize("NFD").replace(/[\u0300-\u036f]/g, "")
+    .replace(/\s*\((?:feat|ft|with)[^)]*\)/gi, "").replace(/\s+(?:feat\.?|ft\.?|featuring)\s.*$/i, "")
+    .replace(/\s*\([^)]*(?:OST|Frozen|Moana|Aladdin|Coco|KPop Demon Hunters)[^)]*\)/gi, "")
+    .replace(/[^\S\r\n]+/g, " ").trim();
+}
+
+function lyricLinksHTML(title, artist) {
+  const t = plainForKorea(title), a = plainForKorea(artist);
+  const naverQ = encodeURIComponent(`${a} ${t}`.trim() + " 가사");
+  const geniusQ = encodeURIComponent(`${a} ${t}`.trim());
+  return `<a class="btn sm ghost" href="https://search.naver.com/search.naver?query=${naverQ}" target="_blank" rel="noopener">네이버 가사 ↗</a><a class="btn sm ghost" href="https://genius.com/search?q=${geniusQ}" target="_blank" rel="noopener">Genius ↗</a>`;
+}
 
 function gradeIndex(g) { const i = GRADES.indexOf(g); return i < 0 ? 4 : i; }
 
@@ -294,7 +333,16 @@ function libraryMatches(g) {
     // 같은 범주의 가까운 항목도 함께 (예: 수동태 기본 ↔ 조동사 수동태)
   }
   const exact = SONG_LIBRARY.filter((s) => s.tags.some((t) => ids.includes(t)));
-  return exact.map((s) => libToCard(s, g));
+  // 같은 범주의 다른 세부 표현이 들어간 곡(곡이 3개 미만일 때 보충용)
+  const cats = new Set(ids.map((id) => (getGrammar(id) || {}).cat).filter(Boolean));
+  const related = SONG_LIBRARY.filter((s) => !exact.includes(s)).map((s) => {
+    const t = s.tags.map(getGrammar).find((x) => x && cats.has(x.cat));
+    return t ? { s, t } : null;
+  }).filter(Boolean);
+  return {
+    exact: exact.map((s) => libToCard(s, g)),
+    related: related.map(({ s, t }) => ({ ...libToCard(s, g), related: t.label })),
+  };
 }
 
 function libToCard(s, g) {
@@ -331,7 +379,8 @@ function sortByGrade(cards) {
 async function findSongs({ more = false } = {}) {
   const g = app.grammar;
   if (!g) { toast("먼저 표현을 골라 주세요.", "error"); return; }
-  const lib = libraryMatches(g);
+  const libAll = libraryMatches(g);
+  const lib = libAll.exact;
   let ai = [];
   let aiError = null;
   if (!more) app.aiShown = [];
@@ -358,9 +407,16 @@ async function findSongs({ more = false } = {}) {
     if (aiError && aiError.code === "cancelled") { toast("AI 추천을 취소했습니다. 기본 목록을 보여 드립니다.", "info"); aiError = null; }
   }
 
-  const cards = more
-    ? dedupeCards(app.cards.concat(ai.map(toCardModel)))
-    : dedupeCards(sortByGrade(ai.map(toCardModel)).concat(sortByGrade(lib.map(toCardModel))));
+  // 표현별 3~6곡: 검증된 기본 목록(최대 3) → AI 추천 → 나머지 기본 목록 → (3곡 미만이면) 같은 범주 곡
+  let cards;
+  if (more) cards = dedupeCards(app.cards.concat(ai.map(toCardModel)));
+  else {
+    const ex = sortByGrade(lib);
+    const ordered = dedupeCards(ex.slice(0, 3).concat(sortByGrade(ai), ex.slice(3)));
+    cards = ordered.slice(0, 6);
+    if (cards.length < 3) cards = dedupeCards(cards.concat(sortByGrade(libAll.related))).slice(0, Math.max(3, cards.length));
+    cards = cards.map(toCardModel);
+  }
   app.cards = cards;
   unlock(2);
   goStep(2);
@@ -378,7 +434,7 @@ function renderSongNotice(g, nAi, nLib, aiError) {
   const box = $("#s2Notice");
   let html = "";
   if (aiError) html += `<div class="notice err"><b>AI 추천을 받지 못했습니다.</b> ${esc(aiError.message)} ${nLib ? "기본 곡 목록에서 찾은 곡을 보여 드립니다." : ""} <button type="button" class="btn sm" id="openSet">AI 설정 열기</button></div>`;
-  if (!API.hasKey()) html += `<div class="notice info">AI 키 없이 <b>기본 곡 목록(${SONG_LIBRARY.length}곡)</b>에서 찾았습니다. 더 다양한 곡은 상단의 <b>AI 설정</b>에서 키를 연결해 주세요.</div>`;
+  if (!API.hasKey()) html += `<div class="notice info">AI 키 없이 <b>기본 곡 목록(${SONG_LIBRARY.length}곡)</b>에서 찾았습니다.${nLib < 3 ? (app.cards.length > nLib ? ` 이 표현이 확실히 들어간 곡이 ${nLib}곡이라, 같은 범주의 다른 표현이 들어간 곡을 함께 보여 드립니다.` : ` 기본 목록에는 이 표현이 확실히 들어간 곡이 ${nLib ? nLib + "곡뿐" : "아직 없"}입니다.`) : ""} AI 키를 연결하면 표현별로 3~6곡을 추천받을 수 있습니다.</div>`;
   if (app.server === false) html += `<div class="notice warn">영상 검색 서버(/api)에 연결할 수 없습니다. Vercel에 배포한 주소에서 열면 영상이 자동으로 연결됩니다. 지금은 ‘YouTube에서 검색’ 후 주소를 붙여 넣어 사용할 수 있습니다.</div>`;
   if (!app.cards.length) {
     const rel = relatedSuggestions(g);
@@ -414,6 +470,7 @@ function renderCards() {
           <span class="bdg ${gradeCls(c.grade)}">${esc(gradeShort(c.grade))} 권장</span>
           <span class="bdg v-${c.vocab}">${VOCAB_KO[c.vocab] || "어휘 중"}</span>
           <span class="bdg ${c.source === "ai" ? "src-ai" : "src-lib"}">${c.source === "ai" ? "AI 추천" : "기본 목록"}</span>
+          ${c.related ? `<span class="bdg">관련 표현: ${esc(c.related)}</span>` : ""}
         </div>
         <h3>${esc(c.title)}</h3>
         <div class="artist">${esc(c.artist)}${c.year ? " · " + esc(c.year) : ""}</div>
@@ -516,8 +573,7 @@ async function pickSong(c) {
   app.selected = { song: { title: c.title, artist: c.artist, year: c.year }, card: c };
   if (app.cardCtrl) { app.cardCtrl.destroy(); app.cardCtrl = null; }
   $("#s3Sub").textContent = `${c.title} — ${c.artist} · ${grammarSummaryOf(app.grammar)}`;
-  const q = encodeURIComponent(`${c.artist} ${c.title}`);
-  $("#lyrLinks").innerHTML = `<a class="btn sm ghost" href="https://search.naver.com/search.naver?query=${q}+%EA%B0%80%EC%82%AC" target="_blank" rel="noopener">네이버 가사 ↗</a><a class="btn sm ghost" href="https://genius.com/search?q=${q}" target="_blank" rel="noopener">Genius ↗</a>`;
+  $("#lyrLinks").innerHTML = lyricLinksHTML(c.title, c.artist);
   const prevLyrics = app.ws && app.ws.song.title === c.title ? app.ws.lyricsText : "";
   if (prevLyrics && !$("#lyrics").value.trim()) $("#lyrics").value = prevLyrics;
   else if (!app.ws || app.ws.song.title !== c.title) $("#lyrics").value = $("#lyrics").dataset.song === c.title ? $("#lyrics").value : "";
@@ -908,20 +964,7 @@ function renderOnlineView() {
   const root = $("#view-online");
   root.innerHTML = renderOnline(app.ws);
   app.dirty.online = false;
-  const score = $(".ol-score", root);
-  root.querySelector("[data-ol=check]").onclick = () => {
-    const r = gradeOnline(root);
-    score.textContent = `가사 빈칸 ${r.correct}/${r.total} 정답` + (r.vTotal ? ` · 단어 ${r.vOk}/${r.vTotal}` + (r.vCheck ? ` (뜻 ${r.vCheck}개는 직접 확인)` : "") : "");
-  };
-  root.querySelector("[data-ol=reveal]").onclick = () => { revealOnline(root); score.textContent = "정답을 표시했습니다."; };
-  root.querySelector("[data-ol=reset]").onclick = () => { resetOnline(root); score.textContent = ""; };
-  root.addEventListener("keydown", (e) => {
-    if (e.key !== "Enter" || e.target.tagName !== "INPUT") return;
-    e.preventDefault();
-    const all = $$("input", root);
-    const i = all.indexOf(e.target);
-    if (all[i + 1]) all[i + 1].focus();
-  });
+  bindOnline(root, app.ws, { onScale: () => saveWorkDebounced() });
 }
 
 function renderEditView() {
@@ -1103,8 +1146,7 @@ function restoreWork() {
       $("#lyrics").value = data.lyrics || "";
       $("#lyrics").dataset.song = data.selected.song.title;
       $("#s3Sub").textContent = `${data.selected.song.title} — ${data.selected.song.artist} · ${grammarSummaryOf(app.grammar)}`;
-      const q = encodeURIComponent(`${data.selected.song.artist} ${data.selected.song.title}`);
-      $("#lyrLinks").innerHTML = `<a class="btn sm ghost" href="https://search.naver.com/search.naver?query=${q}+%EA%B0%80%EC%82%AC" target="_blank" rel="noopener">네이버 가사 ↗</a><a class="btn sm ghost" href="https://genius.com/search?q=${q}" target="_blank" rel="noopener">Genius ↗</a>`;
+      $("#lyrLinks").innerHTML = lyricLinksHTML(data.selected.song.title, data.selected.song.artist);
       updateLyricStat();
       unlock(3);
     }
