@@ -128,24 +128,43 @@ function highlightsFor(ws, line) {
   return findGrammarRanges(ws.grammar, line.en);
 }
 
-export function secretPhrases(ws) {
+/**
+ * 비밀 암호(도전)·사라진 철자에 쓸 '가사 속 구절' 후보.
+ * 줄 전체 또는 쉼표로 나뉜 절 단위로만 잘라 'If I were a boy'처럼 온전한 표현이 되게 합니다.
+ */
+export function lyricPhrases(ws) {
+  const clean = (t) => String(t || "").replace(/\([^)]*\)/g, " ").replace(/[^A-Za-z' ,;:!?.-]/g, " ").replace(/\s+/g, " ").trim();
+  const seen = new Set();
   const out = [];
-  const lines = ws.lines.filter((l) => l.type === "lyric" && l.en);
-  const pick = (l, start, end) => {
-    const words = l.en.slice(start, end).replace(/[^A-Za-z' ]/g, " ").split(/\s+/).filter(Boolean).slice(0, 4);
-    if (words.length >= 2) out.push({ text: words.join(" "), ko: "" });
-  };
-  lines.forEach((l) => {
-    if (out.length >= 2) return;
-    const hl = highlightsFor(ws, l)[0];
-    if (hl) pick(l, hl.start, Math.min(l.en.length, hl.end + 12));
+  ws.lines.filter((l) => l.type === "lyric" && l.en).forEach((l) => {
+    const text = clean(l.en);
+    const hls = highlightsFor(ws, l);
+    const clauses = text.split(/\s*[,;:!?.]\s*|\s+-\s+/).map((c) => c.replace(/[^A-Za-z' ]/g, "").replace(/\s+/g, " ").trim()).filter(Boolean);
+    clauses.forEach((c, ci) => {
+      const words = c.split(" ").filter(Boolean);
+      if (words.length < 2 || words.length > 7) return;
+      const key = c.toLowerCase();
+      if (seen.has(key)) return;
+      seen.add(key);
+      const hasHl = hls.some((h) => c.toLowerCase().includes(l.en.slice(h.start, h.end).toLowerCase().replace(/[^a-z' ]/g, "").trim()));
+      const n = c.replace(/[^A-Za-z]/g, "").length;
+      let score = (hasHl ? 100 : 0) + (clauses.length === 1 ? 20 : 0) - Math.abs(n - 11) * 2 - ci;
+      out.push({ text: c, ko: clauses.length === 1 ? (l.ko || "") : "", score });
+    });
   });
-  for (let i = Math.floor(lines.length / 3); i < lines.length && out.length < 2; i += 3) pick(lines[i], 0, lines[i].en.length);
-  return out.slice(0, 2);
+  return out.sort((a, b) => b.score - a.score);
+}
+
+export function secretPhrases(ws) {
+  const list = lyricPhrases(ws).filter((p) => { const n = p.text.replace(/[^A-Za-z]/g, "").length; return n >= 6 && n <= 20; });
+  const pick = [];
+  for (const p of list) { if (pick.length >= 2) break; if (!pick.some((q) => q.text.toLowerCase() === p.text.toLowerCase())) pick.push(p); }
+  return pick;
 }
 
 export function gameData(ws) {
-  return buildGame(ws.options.game, vocabList(ws), { seed: ws.gameSeed, phrases: secretPhrases(ws), hard: /고등/.test(ws.grade || "") });
+  const phrases = ws.options.game === "missing" ? lyricPhrases(ws) : secretPhrases(ws);
+  return buildGame(ws.options.game, vocabList(ws), { seed: ws.gameSeed, phrases, hard: /고등/.test(ws.grade || "") });
 }
 
 /** Part 1 표에서 각 항목을 '단어 제시' 또는 '뜻 제시'로 */
@@ -284,11 +303,19 @@ function gameHTML(ws, game, answer) {
     return `<div class="g-secret">${keyTable}<div class="sub">[ 단어 ] 번호는 가사 빈칸 번호와 같습니다.</div><div class="two-col"><div>${a.map(item).join("")}</div><div>${b.map(item).join("")}</div></div>${hard ? `<div class="sub">[ 도전 ] 가사 속 구절</div>${hard}` : ""}</div>`;
   }
   const isMissing = game.type === "missing";
-  const head = `<thead><tr><th class="n">No</th><th>${isMissing ? "단어" : "섞인 철자"}</th><th>뜻</th><th class="w">${isMissing ? "빠진 철자" : "정답"}</th></tr></thead>`;
-  const row = (it) => `<tr><td class="n">${it.num}</td><td class="mono">${isMissing ? (answer ? esc(it.word) : esc(it.shown)) : esc(it.shuffled)}</td><td>${esc(it.meaning || "")}</td><td class="w${answer ? " a" : ""}">${answer ? esc(isMissing ? it.missing : it.word) : ""}</td></tr>`;
+  const ordered = isMissing && game.phrase;
+  const head = `<thead><tr>${ordered ? '<th class="n">순서</th>' : ""}<th class="n">No</th><th>${isMissing ? "단어" : "섞인 철자"}</th><th>뜻</th><th class="w">${isMissing ? "빠진 철자" : "정답"}</th></tr></thead>`;
+  const row = (it) => `<tr>${ordered ? `<td class="n o">${it.order}</td>` : ""}<td class="n">${it.num}</td><td class="mono">${isMissing ? (answer ? esc(it.word) : esc(it.shown)) : esc(it.shuffled)}</td><td>${esc(it.meaning || "")}</td><td class="w${answer ? " a" : ""}">${answer ? esc(isMissing ? it.missing : it.word) : ""}</td></tr>`;
   const [a, b] = halves(game.items);
-  const tbl = (rows) => `<table class="ws-list"><colgroup><col style="width:9%"><col style="width:36%"><col style="width:25%"><col></colgroup>${head}<tbody>${rows.map(row).join("")}</tbody></table>`;
-  return `<div class="two-col">${tbl(a)}${b.length ? tbl(b) : "<div></div>"}</div>`;
+  const colg = ordered ? '<col style="width:9%"><col style="width:9%"><col style="width:33%"><col style="width:25%"><col>' : '<col style="width:9%"><col style="width:36%"><col style="width:25%"><col>';
+  const tbl = (rows) => `<table class="ws-list"><colgroup>${colg}</colgroup>${head}<tbody>${rows.map(row).join("")}</tbody></table>`;
+  let phraseBox = "";
+  if (ordered) {
+    let k = 0;
+    const boxes = game.phraseWords.map((n) => `<span class="pw">${Array.from({ length: n }, () => { const it = game.items[k++]; return `<span class="pb"><i>${it.order}</i>${answer ? it.missing : ""}</span>`; }).join("")}</span>`).join("");
+    phraseBox = `<div class="phrase-box"><div class="sub">[ 비밀 구절 ] 빠진 철자를 <b>순서</b>대로 모아 가사 속 구절을 완성하세요.</div><div class="pbs">${boxes}</div>${answer ? `<div class="pa">정답: <b>${esc(game.phrase)}</b></div>` : '<div class="pa">구절: ________________________________</div>'}</div>`;
+  }
+  return `<div class="two-col">${tbl(a)}${b.length ? tbl(b) : "<div></div>"}</div>${phraseBox}`;
 }
 
 export function renderPage2(ws) {

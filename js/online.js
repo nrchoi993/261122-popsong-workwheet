@@ -61,9 +61,25 @@ function part2HTML(ws, game) {
     return `<div class="p2-key">${"ABCDEFGHIJKLMNOPQRSTUVWXYZ".split("").map((k, i) => `<span><b>${k}</b>${i + 1}</span>`).join("")}</div><div class="p2-grid">${easy}</div>${hard ? `<div class="p2-grid">${hard}</div>` : ""}`;
   }
   if (game.type === "missing") {
-    return `<div class="p2-grid">${game.items.map((it) => `<div class="p2q"><button type="button" class="vq-n" data-peek>${it.num}</button><div class="p2p"><span class="mono">${esc(it.shown)}</span> <span class="muted">${esc(it.meaning || "")}</span></div><input ${inputAttrs(it.missing, it.num + "번 빠진 철자", 'data-sec="p2" data-kind="word" maxlength="2" class="letter" placeholder="?"')}><span class="vq-r"></span></div>`).join("")}</div>`;
+    const items = game.items.map((it, i) => `<div class="p2q"><button type="button" class="vq-n" data-peek title="정답 보기">${game.phrase ? it.order : it.num}</button><div class="p2p">${game.phrase ? `<small class="muted">${it.num}번</small> ` : ""}<span class="mono">${esc(it.shown)}</span> <span class="muted">${esc(it.meaning || "")}</span></div><input ${inputAttrs(it.missing, (game.phrase ? it.order + "번째 " : it.num + "번 ") + "빠진 철자", `data-sec="p2" data-kind="word" data-ml="${i}" maxlength="2" class="letter" placeholder="?"`)}><span class="vq-r"></span></div>`).join("");
+    let box = "";
+    if (game.phrase) {
+      let k = 0;
+      const boxes = game.phraseWords.map((n) => `<span class="pw">${Array.from({ length: n }, () => { const i = k++; return `<span class="pb" data-pb="${i}"><i>${i + 1}</i><b></b></span>`; }).join("")}</span>`).join("");
+      box = `<div class="ol-phrase"><div class="sub">비밀 구절 — 빠진 철자를 순서대로 모아 보세요.</div><div class="pbs">${boxes}</div>
+        <div class="p2q wide"><button type="button" class="vq-n" data-peek>구절</button><div class="p2p">완성한 가사 구절</div><input ${inputAttrs(game.phrase, "비밀 구절", 'data-sec="p2" data-kind="word" placeholder="예: If I ..."')}><span class="vq-r"></span></div></div>`;
+    }
+    return `<div class="p2-grid">${items}</div>${box}`;
   }
   return `<div class="p2-grid">${game.items.map((it) => `<div class="p2q"><button type="button" class="vq-n" data-peek>${it.num}</button><div class="p2p"><span class="mono">${esc(it.shuffled)}</span> <span class="muted">${esc(it.meaning || "")}</span></div><input ${inputAttrs(it.word, it.num + "번 단어", 'data-sec="p2" data-kind="word" placeholder="단어"')}><span class="vq-r"></span></div>`).join("")}</div>`;
+}
+
+function secHead(title) {
+  return `<div class="ol-sh"><h3 class="ol-h">${esc(title)}</h3><div class="ol-pacts">
+    <button type="button" class="btn sm" data-pact="check">이 Part 채점</button>
+    <button type="button" class="btn sm" data-pact="reveal">이 Part 정답</button>
+    <button type="button" class="btn sm ghost" data-pact="reset">지우기</button>
+    <span class="ol-pscore" aria-live="polite"></span></div></div>`;
 }
 
 export function renderOnline(ws) {
@@ -84,13 +100,13 @@ export function renderOnline(ws) {
       <div class="ol-score" aria-live="polite"></div>
     </div>
     <p class="muted small ol-help">번호(●)를 누르면 그 칸의 정답만 잠깐 볼 수 있습니다. ‘눌러서 정답 보기’ 모드에서는 칸을 누를 때마다 정답이 나타나고 사라집니다.</p>
-    <h3 class="ol-h">가사 빈칸</h3>
-    <div class="ol-lyrics">${lyricsHTML(ws)}</div>
-    <h3 class="ol-h">Part 1. Vocabulary Check</h3>
-    <p class="muted small">뜻 문항은 표현이 조금 달라도 정답일 수 있어, 자동으로 맞지 않으면 정답과 비교해 직접 확인하도록 표시합니다.</p>
-    <div class="ol-vocab">${vocabHTML(ws)}</div>
-    <h3 class="ol-h">Part 2. ${esc(GAME_TYPES[ws.options.game].name)}</h3>
-    <div class="ol-p2" data-game="${game.type}">${part2HTML(ws, game)}</div>
+    <section class="ol-sec" data-part="lyrics">${secHead("가사 빈칸")}
+      <div class="ol-lyrics">${lyricsHTML(ws)}</div></section>
+    <section class="ol-sec" data-part="vocab">${secHead("Part 1. Vocabulary Check")}
+      <p class="muted small">뜻 문항은 표현이 조금 달라도 정답일 수 있어, 자동으로 맞지 않으면 정답과 비교해 직접 확인하도록 표시합니다.</p>
+      <div class="ol-vocab">${vocabHTML(ws)}</div></section>
+    <section class="ol-sec" data-part="p2">${secHead("Part 2. " + GAME_TYPES[ws.options.game].name)}
+      <div class="ol-p2" data-game="${game.type}">${part2HTML(ws, game)}</div></section>
   </div>`;
 }
 
@@ -120,6 +136,7 @@ function checkInput(inp) {
 function gradeAll(root, wsState) {
   const tally = { lyrics: [0, 0], vocab: [0, 0, 0], p2: [0, 0] };
   root.querySelectorAll("input[data-sec]").forEach((inp) => {
+    if (inp.dataset.sec === "p2" && wsState) return;
     const sec = inp.dataset.sec;
     const res = checkInput(inp);
     tally[sec][1]++;
@@ -164,8 +181,44 @@ export function bindOnline(root, ws, { onScale } = {}) {
     online.classList.toggle("peek-mode", m === "peek");
   };
 
+  const revealIn = (scope) => {
+    scope.querySelectorAll("input[data-answer]").forEach((inp) => { inp.value = inp.dataset.answer || ""; inp.classList.remove("ng", "check", "peeked"); inp.classList.add("revealed"); });
+    if (wsState && scope.querySelector(".ws-board")) wsState.words.forEach((w) => markFound(w));
+    syncPhrase();
+  };
+  const resetIn = (scope) => {
+    scope.querySelectorAll("input[data-answer]").forEach((inp) => { inp.value = ""; inp.dataset.typed = ""; inp.classList.remove("ok", "ng", "check", "revealed", "peeked"); });
+    scope.querySelectorAll(".vq-r").forEach((r) => { r.textContent = ""; });
+    if (wsState && scope.querySelector(".ws-board")) { wsState.found.clear(); wsState.start = null; scope.querySelectorAll(".wsc").forEach((c) => c.classList.remove("found", "sel", "bad")); scope.querySelectorAll(".wchip").forEach((c) => c.classList.remove("done")); }
+    scope.querySelectorAll(".ol-pscore").forEach((x) => { x.textContent = ""; });
+    syncPhrase();
+  };
+  const gradeIn = (sec) => {
+    const part = sec.dataset.part;
+    if (part === "p2" && wsState) return `${wsState.count()}/${wsState.total} 찾음`;
+    let ok = 0, n = 0, chk = 0;
+    sec.querySelectorAll("input[data-sec]").forEach((inp) => { const r = checkInput(inp); n++; if (r === "ok") ok++; if (r === "check") chk++; });
+    return `${ok}/${n} 정답${chk ? ` · ${chk}개 직접 확인` : ""}`;
+  };
+  function syncPhrase() {
+    root.querySelectorAll("[data-pb]").forEach((pb) => {
+      const inp = root.querySelector(`input[data-ml="${pb.dataset.pb}"]`);
+      pb.querySelector("b").textContent = inp ? String(inp.value || "").toUpperCase().slice(0, 1) : "";
+    });
+  }
+  root.addEventListener("input", (e) => { if (e.target.matches("input[data-ml]")) syncPhrase(); });
+
   root.addEventListener("click", (e) => {
     const t = e.target;
+    const pact = t.closest("[data-pact]");
+    if (pact) {
+      const sec = pact.closest(".ol-sec");
+      const out = sec.querySelector(".ol-pscore");
+      if (pact.dataset.pact === "check") out.textContent = gradeIn(sec);
+      else if (pact.dataset.pact === "reveal") { revealIn(sec); out.textContent = "정답 표시"; }
+      else resetIn(sec);
+      return;
+    }
     const modeBtn = t.closest("[data-mode]");
     if (modeBtn) { setMode(modeBtn.dataset.mode); return; }
     const act = t.closest("[data-ol]");
@@ -175,13 +228,10 @@ export function bindOnline(root, ws, { onScale } = {}) {
         const s = gradeAll(root, wsState);
         scoreEl.textContent = `가사 ${s.lyrics[0]}/${s.lyrics[1]} · Part 1 ${s.vocab[0]}/${s.vocab[1]}${s.vocab[2] ? ` (뜻 ${s.vocab[2]}개 직접 확인)` : ""} · Part 2 ${s.p2[0]}/${s.p2[1]}`;
       } else if (a === "reveal") {
-        root.querySelectorAll("input[data-answer]").forEach((inp) => { inp.value = inp.dataset.answer || ""; inp.classList.remove("ng", "check", "peeked"); inp.classList.add("revealed"); });
-        if (wsState) wsState.words.forEach((w) => markFound(w));
+        revealIn(root);
         scoreEl.textContent = "모든 정답을 표시했습니다.";
       } else if (a === "reset") {
-        root.querySelectorAll("input[data-answer]").forEach((inp) => { inp.value = ""; inp.dataset.typed = ""; inp.classList.remove("ok", "ng", "check", "revealed", "peeked"); });
-        root.querySelectorAll(".vq-r").forEach((r) => { r.textContent = ""; });
-        if (wsState) { wsState.found.clear(); wsState.start = null; root.querySelectorAll(".wsc").forEach((c) => c.classList.remove("found", "sel", "bad")); root.querySelectorAll(".wchip").forEach((c) => c.classList.remove("done")); }
+        resetIn(root);
         scoreEl.textContent = "";
       } else if (a === "bigger" || a === "smaller") {
         const cur = ws.options.onlineScale || 1;
@@ -195,9 +245,9 @@ export function bindOnline(root, ws, { onScale } = {}) {
     }
     // 번호 버튼: 그 칸 정답 잠깐 보기
     const peek = t.closest("[data-peek]");
-    if (peek) { peekToggle(peek.parentElement.querySelector("input[data-answer]")); return; }
+    if (peek) { peekToggle(peek.parentElement.querySelector("input[data-answer]")); syncPhrase(); return; }
     // '눌러서 정답 보기' 모드에서 입력칸 클릭
-    if (mode === "peek" && t.matches("input[data-answer]")) { peekToggle(t); return; }
+    if (mode === "peek" && t.matches("input[data-answer]")) { peekToggle(t); syncPhrase(); return; }
     // 단어 찾기
     const cellBtn = t.closest(".wsc");
     if (cellBtn && wsState) { wsClick(cellBtn); return; }

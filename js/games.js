@@ -6,7 +6,7 @@
 export const GAME_TYPES = {
   wordsearch: { name: "단어 찾기 (Word Search)", short: "단어 찾기", guide: "표 안에 숨어 있는 단어를 찾아 동그라미 하세요. (가로 →, 세로 ↓, 대각선 ↘ ↗)" },
   secret: { name: "비밀 암호 (Secret Code)", short: "비밀 암호", guide: "Secret Code Key를 보고 숫자를 알파벳으로 바꾸어 단어와 문장을 완성하세요." },
-  missing: { name: "사라진 철자 (Missing Letters)", short: "사라진 철자", guide: "뜻을 보고 빠진 철자를 채워 단어를 완성하세요." },
+  missing: { name: "사라진 철자 (Missing Letters)", short: "사라진 철자", guide: "뜻을 보고 빠진 철자를 채워 단어를 완성한 뒤, 빠진 철자를 번호 순서대로 모아 가사 속 비밀 구절을 완성하세요." },
   scramble: { name: "철자 섞기 (Word Shuffle)", short: "철자 섞기", guide: "섞인 철자를 바르게 배열하여 단어를 완성하세요." },
 };
 
@@ -22,18 +22,30 @@ export function rng(seed) {
 
 const letters = (w) => String(w || "").toUpperCase().replace(/[^A-Z]/g, "");
 
+/** Part 2에 쓸 단어 수(전부 쓸 필요 없음) */
+export const PART2_LIMIT = { wordsearch: 12, secret: 8, scramble: 10, missing: 18 };
+
+/** 번호 순서를 유지하며 고르게 n개 고르기 */
+function pickSpread(list, n) {
+  if (list.length <= n) return list.slice();
+  const out = [];
+  for (let i = 0; i < n; i++) out.push(list[Math.floor((i * list.length) / n)]);
+  return out;
+}
+
 export function buildGame(type, vocab, opts = {}) {
   const rand = rng(opts.seed || 1);
   if (type === "wordsearch") return wordSearch(vocab, rand, opts);
   if (type === "secret") return secretCode(vocab, rand, opts);
-  if (type === "missing") return missingLetters(vocab, rand);
+  if (type === "missing") return missingLetters(vocab, rand, opts.phrases || []);
   return scramble(vocab, rand);
 }
 
 function wordSearch(vocab, rand, opts) {
   // 모든 빈칸 단어를 넣습니다(같은 철자는 한 번만). 다 들어가지 않으면 표를 키워 다시 배치합니다.
   const seen = new Set();
-  const all = vocab.map((v) => ({ num: v.num, word: letters(v.head || v.answer), meaning: v.meaning, display: v.head || v.answer })).filter((w) => w.word.length >= 1);
+  const pool = vocab.map((v) => ({ num: v.num, word: letters(v.head || v.answer), meaning: v.meaning, display: v.head || v.answer })).filter((w) => w.word.length >= 3 && w.word.length <= 12);
+  const all = pickSpread(pool.length >= 6 ? pool : vocab.map((v) => ({ num: v.num, word: letters(v.head || v.answer), meaning: v.meaning, display: v.head || v.answer })).filter((w) => w.word.length >= 2), PART2_LIMIT.wordsearch);
   // 같은 철자는 표에 한 번만 숨기고, 목록에는 번호별로 모두 표시
   const words = all.filter((w) => !seen.has(w.word) && seen.add(w.word));
   const usable = words.filter((w) => w.word.length <= 16);
@@ -87,27 +99,63 @@ function encode(word) {
 
 function secretCode(vocab, rand, opts) {
   // 모든 빈칸 단어(번호 그대로)
-  const easy = vocab.filter((v) => letters(v.head || v.answer).length >= 1).map((v) => ({
+  const easy = pickSpread(vocab.filter((v) => { const n = letters(v.head || v.answer).length; return n >= 3 && n <= 10; }), PART2_LIMIT.secret).map((v) => ({
     num: v.num, word: letters(v.head || v.answer), display: v.head || v.answer, meaning: v.meaning, code: encode(v.head || v.answer),
   }));
   const hard = (opts.phrases || []).slice(0, 2).map((p) => ({
     phrase: p.text,
     ko: p.ko || "",
-    words: p.text.split(/\s+/).map((w) => ({ word: letters(w), code: encode(w) })).filter((w) => w.word),
+    words: p.text.split(/\s+/).map((w) => ({ word: letters(w), code: encode(w), raw: w })).filter((w) => w.word),
   }));
   return { type: "secret", easy, hard };
 }
 
-function missingLetters(vocab, rand) {
-  const items = vocab.filter((v) => letters(v.head || v.answer).length >= 1).map((v) => {
+/**
+ * 사라진 철자: 빠진 철자를 번호 순서대로 모으면 가사 속 구절이 완성되도록 단어를 고릅니다.
+ * (예: IF I WERE A BOY → 11개 단어에서 한 글자씩)
+ */
+function missingLetters(vocab, rand, phrases) {
+  const blankOne = (word, idx) => word.split("").map((ch, i) => (i === idx ? "_" : ch)).join("");
+  const words = vocab.map((v) => ({ v, word: String(v.head || v.answer) }));
+  for (const p of phrases) {
+    const target = letters(p.text);
+    if (target.length < 5 || target.length > PART2_LIMIT.missing || target.length > words.length) continue;
+    // 구절의 각 글자 ↔ 그 글자를 가진 단어(서로 다른 단어) 짝짓기 (이분 매칭)
+    const cand = target.split("").map((ch) => words.map((w, wi) => (w.word.toUpperCase().includes(ch) ? wi : -1)).filter((x) => x >= 0).sort(() => rand() - 0.5));
+    const owner = new Map(); // word index -> letter index
+    const tryAssign = (li, seen) => {
+      for (const wi of cand[li]) {
+        if (seen.has(wi)) continue;
+        seen.add(wi);
+        if (!owner.has(wi) || tryAssign(owner.get(wi), seen)) { owner.set(wi, li); return true; }
+      }
+      return false;
+    };
+    let ok = true;
+    for (let li = 0; li < target.length; li++) if (!tryAssign(li, new Set())) { ok = false; break; }
+    if (!ok) continue;
+    const byLetter = new Map();
+    owner.forEach((li, wi) => byLetter.set(li, wi));
+    const items = target.split("").map((need, li) => {
+      const { v, word } = words[byLetter.get(li)];
+      const idxs = [];
+      for (let i = 0; i < word.length; i++) if (word[i].toUpperCase() === need) idxs.push(i);
+      const pref = idxs.filter((i) => i > 0);
+      const use = pref.length ? pref : idxs;
+      const pick = use[Math.floor(rand() * use.length)];
+      return { order: li + 1, num: v.num, word, shown: blankOne(word, pick), missing: need, meaning: v.meaning };
+    });
+    return { type: "missing", items, phrase: p.text, phraseWords: p.text.split(/\s+/).map((w) => letters(w).length).filter(Boolean) };
+  }
+  // 구절을 만들 수 없을 때: 일반 빈칸 철자
+  const items = pickSpread(vocab.filter((v) => letters(v.head || v.answer).length >= 3), 12).map((v) => {
     const word = String(v.head || v.answer);
     const idxs = [];
-    for (let i = 0; i < word.length; i++) if (/[A-Za-z]/.test(word[i]) && (i > 0 || word.length <= 2)) idxs.push(i);
+    for (let i = 1; i < word.length; i++) if (/[A-Za-z]/.test(word[i])) idxs.push(i);
     const pick = idxs[Math.floor(rand() * idxs.length)];
-    const shown = word.split("").map((ch, i) => (i === pick ? "_" : ch)).join(" ");
-    return { num: v.num, word, shown, missing: word[pick].toUpperCase(), meaning: v.meaning };
+    return { order: 0, num: v.num, word, shown: blankOne(word, pick), missing: word[pick].toUpperCase(), meaning: v.meaning };
   });
-  return { type: "missing", items };
+  return { type: "missing", items, phrase: "", phraseWords: [] };
 }
 
 function shuffleWord(word, rand) {
@@ -124,7 +172,7 @@ function shuffleWord(word, rand) {
 }
 
 function scramble(vocab, rand) {
-  const items = vocab.filter((v) => letters(v.head || v.answer).length >= 1).map((v) => ({
+  const items = pickSpread(vocab.filter((v) => letters(v.head || v.answer).length >= 3), PART2_LIMIT.scramble).map((v) => ({
     num: v.num, word: v.head || v.answer, shuffled: shuffleWord(v.head || v.answer, rand), meaning: v.meaning,
   }));
   return { type: "scramble", items };

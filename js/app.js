@@ -5,7 +5,7 @@
 import { GRADES, CATEGORIES, GRAMMAR_ITEMS, searchGrammar, getGrammar, categoryOf, makeCustomGrammar, levelLabel } from "./data/grammar-catalog.js";
 import { SONG_LIBRARY } from "./data/song-library.js";
 import * as API from "./llm-client.js";
-import { recommendSongs, buildWorksheetWithAI, fillMeanings, translateLines } from "./ai-tasks.js";
+import { recommendSongs, buildWorksheetWithAI, fillMeanings, translateLines, labelSections } from "./ai-tasks.js";
 import { resolveVideos, mountPlayer, parseYouTubeId, watchUrl, searchUrl, thumbUrl } from "./youtube.js";
 import { parseLyrics, collapseRepeats } from "./lyrics.js";
 import {
@@ -46,6 +46,7 @@ function init() {
   initStep2();
   initStep3();
   initStep4();
+  initVideoStage();
   restoreWork();
   checkServer();
   window.addEventListener("resize", debounce(() => { if (app.step === 4) layoutPages(); }, 150));
@@ -67,9 +68,9 @@ async function checkServer() {
 function bindSettings() {
   const panel = $("#settingsPanel");
   const pill = $("#apiPill");
-  const open = (v, scroll = true) => { panel.hidden = !v; pill.setAttribute("aria-expanded", String(v)); if (v && scroll) window.scrollTo({ top: 0, behavior: "smooth" }); };
-  pill.addEventListener("click", () => open(panel.hidden));
-  $("#settingsClose").addEventListener("click", () => open(false));
+  const open = (v, scroll = true) => { panel.hidden = !v; pill.setAttribute("aria-expanded", String(v)); if (v) setSettingsBody(true); if (v && scroll) window.scrollTo({ top: 0, behavior: "smooth" }); };
+  pill.addEventListener("click", () => { if (panel.hidden || $("#settingsBody").hidden) open(true); else if (app.step > 1) open(false); else setSettingsBody(false); });
+  $("#settingsToggle").addEventListener("click", () => setSettingsBody($("#settingsBody").hidden));
 
   const s = API.state;
   $("#provider").value = s.provider;
@@ -114,10 +115,18 @@ function bindSettings() {
     finally { btn.disabled = false; }
   });
 
-  if (!s.apiKey && !localStorage.getItem("popsong.seenSettings")) {
-    open(true, false);
-    try { localStorage.setItem("popsong.seenSettings", "1"); } catch (e) { /* */ }
-  }
+  // 1단계에서만 보이고, 연결이 끝났으면 접힌 상태로 시작
+  panel.hidden = false;
+  setSettingsBody(s.status !== "ok" && !(s.apiKey && localStorage.getItem("popsong.seenSettings")));
+  try { localStorage.setItem("popsong.seenSettings", "1"); } catch (e) { /* */ }
+}
+
+function setSettingsBody(show) {
+  $("#settingsBody").hidden = !show;
+  const t = $("#settingsToggle");
+  t.textContent = show ? "접기 ▲" : "펼치기 ▼";
+  t.setAttribute("aria-expanded", String(show));
+  $("#apiPill").setAttribute("aria-expanded", String(show && !$("#settingsPanel").hidden));
 }
 
 function fillModelSelect() {
@@ -140,6 +149,8 @@ function renderApiStatus(s) {
   pill.className = "api-pill " + v.cls;
   pill.querySelector(".pill-label").textContent = v.label;
   pill.querySelector(".pill-sub").textContent = s.apiKey ? API.PROVIDERS[s.provider].name.split(" ")[0] : "AI 설정";
+  const mini = $("#apiMini");
+  if (mini) { mini.className = "api-mini " + v.cls; mini.querySelector("b").textContent = v.label + (s.apiKey ? " · " + API.PROVIDERS[s.provider].name.split(" ")[0] : ""); }
   const box = $("#apiStatus");
   box.className = "api-status " + v.cls;
   $("#apiStatusLabel").textContent = v.label;
@@ -187,8 +198,11 @@ function goStep(n) {
   });
   if (n !== 2 && app.cardCtrl) { app.cardCtrl.destroy(); app.cardCtrl = null; renderCardsVideoReset(); }
   if (n !== 3 && app.s3Ctrl) { app.s3Ctrl.destroy(); app.s3Ctrl = null; }
+  // AI 설정은 1단계에서만 보이고, 2단계부터 자동으로 접어 둠(상단 버튼으로 언제든 열 수 있음)
+  $("#settingsPanel").hidden = n !== 1;
+  if (n === 1 && API.state.status === "ok") setSettingsBody(false);
   if (n === 3) mountStep3Player();
-  if (n === 4) renderStep4();
+  if (n === 4) { renderStep4(); mountVideoStage(); } else destroyVideoStage();
   updateAiHints();
   window.scrollTo({ top: 0, behavior: "smooth" });
 }
@@ -579,6 +593,7 @@ async function pickSong(c) {
   else if (!app.ws || app.ws.song.title !== c.title) $("#lyrics").value = $("#lyrics").dataset.song === c.title ? $("#lyrics").value : "";
   $("#lyrics").dataset.song = c.title;
   updateLyricStat();
+  renderCacheNote();
   unlock(3);
   goStep(3);
   saveWork();
@@ -633,6 +648,7 @@ function initStep3() {
   });
   $("#genBtn").addEventListener("click", generate);
   $("#trBtn").addEventListener("click", aiTranslateLyrics);
+  $("#secBtn").addEventListener("click", aiLabelSections);
   $("#trUndo").addEventListener("click", () => {
     if (app.trUndo == null) return;
     $("#lyrics").value = app.trUndo;
@@ -653,12 +669,52 @@ function linesToText(lines) {
   }).join("\n");
 }
 
+async function aiLabelSections() {
+  const text = $("#lyrics").value;
+  const lines = parseLyrics(text);
+  const en = lines.map((l, i) => ({ i, en: l.en, type: l.type })).filter((l) => l.type === "lyric" && l.en);
+  if (en.length < 4) { toast("먼저 영어 가사를 붙여 넣어 주세요.", "error"); return; }
+  if (lines.some((l) => l.type === "label") && !confirm("이미 구간 표시가 있습니다. AI가 다시 나눌까요? (기존 표시는 바뀝니다)")) return;
+  if (!API.hasKey()) { toast("구간 표시는 API 키가 필요합니다. 1단계의 ‘AI 연결 설정’에서 키를 연결해 주세요.", "error", 6000); return; }
+  app.abort = new AbortController();
+  showLoading({ title: "가사 구간을 나누고 있어요", kind: "translate", steps: [{ label: `영어 ${en.length}줄 분석`, state: "done" }, { label: "[Verse]·[Chorus] 구간 찾기 (AI)", state: "run" }], onCancel: () => app.abort && app.abort.abort() });
+  try {
+    const song = (app.selected && app.selected.song) || { title: "", artist: "" };
+    const secs = await labelSections({ song, items: en.map((l) => ({ i: l.i, en: l.en })), signal: app.abort.signal });
+    if (secs.length < 2) throw new Error("구간을 나누지 못했습니다. 다시 시도해 주세요.");
+    if ($("#lyrics").value !== text) { toast("작업하는 동안 가사가 바뀌어 적용하지 않았습니다.", "error"); return; }
+    const starts = new Map(secs.map((x) => [x.start, x.label]));
+    const out = [];
+    lines.forEach((l, i) => {
+      if (l.type === "label" || l.type === "break") return;
+      if (starts.has(i)) { if (out.length) out.push(""); out.push("[" + starts.get(i) + "]"); }
+      out.push(l.en && l.ko ? l.en + "\n" + l.ko : (l.en || l.ko));
+    });
+    app.trUndo = text;
+    $("#lyrics").value = out.join("\n");
+    $("#trUndo").hidden = false;
+    updateLyricStat(); saveWork();
+    toast(`구간 ${secs.length}개(${[...new Set(secs.map((x) => x.label))].join(", ")})를 붙였습니다. 가사 칸에서 확인하고 고칠 수 있어요.`, "ok", 6500);
+  } catch (e) {
+    if (e.code !== "cancelled") toast("구간을 나누지 못했습니다: " + e.message, "error", 7000);
+  } finally {
+    hideLoading();
+  }
+}
+
 async function aiTranslateLyrics() {
   const text = $("#lyrics").value;
   const lines = parseLyrics(text);
+  const cached = getSongCache(app.selected && app.selected.song);
+  let fromCache = 0;
+  if (cached && cached.ko) lines.forEach((l) => { if (l.type === "lyric" && l.en && !l.ko && cached.ko[enKey(l.en)]) { l.ko = cached.ko[enKey(l.en)]; fromCache++; } });
   const todo = lines.map((l, i) => ({ i, en: l.en, ko: l.ko, type: l.type })).filter((l) => l.type === "lyric" && l.en && !l.ko);
   if (!lines.some((l) => l.type === "lyric" && l.en)) { toast("먼저 영어 가사를 붙여 넣어 주세요.", "error"); $("#lyrics").focus(); return; }
-  if (!todo.length) { toast("모든 영어 줄에 이미 해석이 있습니다.", "info"); return; }
+  if (!todo.length) {
+    if (fromCache) { app.trUndo = text; $("#lyrics").value = linesToText(lines); $("#trUndo").hidden = false; updateLyricStat(); saveWork(); toast(`보관해 둔 해석 ${fromCache}줄을 채웠습니다(AI 요청 없음).`, "ok"); }
+    else toast("모든 영어 줄에 이미 해석이 있습니다.", "info");
+    return;
+  }
   if (!API.hasKey()) {
     toast("AI 해석은 API 키가 필요합니다. 상단 ‘AI 설정’에서 키를 연결해 주세요.", "error", 6000);
     $("#settingsPanel").hidden = false; $("#apiPill").setAttribute("aria-expanded", "true");
@@ -676,7 +732,7 @@ async function aiTranslateLyrics() {
   });
   try {
     const ko = await translateLines({ song, items: todo.map((l) => ({ i: l.i, en: l.en })), signal: app.abort.signal });
-    let n = 0;
+    let n = fromCache;
     Object.keys(ko).forEach((i) => { if (lines[i] && !lines[i].ko) { lines[i].ko = ko[i]; n++; } });
     if (!n) throw new Error("AI가 해석을 돌려주지 않았습니다. 다시 시도해 주세요.");
     // 원래 입력이 바뀌지 않았을 때만 덮어씀
@@ -684,8 +740,12 @@ async function aiTranslateLyrics() {
     app.trUndo = text;
     $("#lyrics").value = linesToText(lines);
     $("#trUndo").hidden = false;
+    const koMap = {};
+    lines.forEach((l) => { if (l.en && l.ko) koMap[enKey(l.en)] = l.ko; });
+    putSongCache(song, { ko: koMap });
+    renderCacheNote();
     updateLyricStat(); saveWork();
-    const miss = todo.length - n;
+    const miss = todo.length + fromCache - n;
     toast(`해석 ${n}줄을 채웠습니다.${miss ? ` (${miss}줄은 비어 있어 직접 입력해 주세요)` : ""} 가사 칸에서 확인하고 고쳐 주세요.`, "ok", 6000);
     $("#lyrics").focus();
     $("#lyrics").setSelectionRange(0, 0);
@@ -740,6 +800,15 @@ async function generate() {
   }
   const song = { ...app.selected.song, videoId: app.selected.videoId || "" };
   const ws = createWorksheet({ song, grammar: app.grammar, grade: app.grade || app.selected.card.grade, lyricsText: text, options: readOptions() });
+  // 보관해 둔 곡 정보 재사용
+  const cache = getSongCache(song);
+  const tipKey = app.grammar.id + ":" + app.grammar.label;
+  if (cache) {
+    if (cache.ko) ws.baseLines.forEach((l) => { if (l.en && !l.ko && cache.ko[enKey(l.en)]) l.ko = cache.ko[enKey(l.en)]; });
+    if (cache.info) ws.info = cache.info;
+    if (cache.tips && cache.tips[tipKey]) ws.grammarTip = cache.tips[tipKey];
+    ws.lines = computeLines(ws);
+  }
 
   if (API.hasKey()) {
     app.abort = new AbortController();
@@ -759,6 +828,7 @@ async function generate() {
       const res = await buildWorksheetWithAI({
         song, grammar: app.grammar, grade: ws.grade, lines: ws.lines, blankCount: ws.options.blankCount,
         focus: ws.options.focus, needTranslation: ws.options.translation, signal: app.abort.signal,
+        skipInfo: !!(cache && cache.info), skipTip: !!(cache && cache.tips && cache.tips[tipKey]),
       });
       setLoadingStep(1, "done"); setLoadingStep(2, Object.keys(res.translations).length || !needKo ? "done" : "fail");
       // 표시 줄 → 원본 줄 번호로 변환
@@ -771,6 +841,7 @@ async function generate() {
       ws.lines = computeLines(ws);
       setLoadingStep(3, "run");
       const added = fillAutoBlanks(ws);
+      if (cache && cache.meanings) visibleBlanks(ws).forEach((b) => { const m = cache.meanings[b.answer.toLowerCase()]; if (!b.meaning && m) { b.head = m.head || b.head; b.pos = m.pos || b.pos; b.meaning = m.meaning; } });
       if (added) {
         const missing = visibleBlanks(ws).filter((b) => !b.meaning);
         if (missing.length) {
@@ -792,6 +863,7 @@ async function generate() {
     }
   } else {
     fillAutoBlanks(ws);
+    if (cache && cache.meanings) visibleBlanks(ws).forEach((b) => { const m = cache.meanings[b.answer.toLowerCase()]; if (m) { b.head = m.head || b.head; b.pos = m.pos || b.pos; b.meaning = m.meaning; } });
     ws.warnings = ["AI 키 없이 만들어 빈칸 단어의 뜻·품사가 비어 있습니다. ‘빈칸·단어 편집’ 탭에서 입력하거나, AI를 연결한 뒤 ‘뜻 자동 채우기’를 눌러 주세요."];
   }
 
@@ -851,6 +923,7 @@ function setView(v) {
   $$(".tabs [role=tab]").forEach((t) => t.setAttribute("aria-selected", String(t.id === "tab-" + v)));
   ["preview", "online", "edit"].forEach((k) => { $("#view-" + k).hidden = k !== v; });
   $("#viewTools").hidden = v === "edit";
+  if (app.step === 4) { if (v === "edit") { $("#videoStage").hidden = true; } else if (stageCandidates().length) { $("#videoStage").hidden = false; mountVideoStage(); } }
   $("#fontTools").hidden = v !== "preview";
   renderStep4();
 }
@@ -1124,6 +1197,7 @@ function saveWork() {
     };
     localStorage.setItem(WORK_KEY, JSON.stringify(data));
   } catch (e) { /* 저장 공간 부족 등은 무시 */ }
+  if (app.ws) cacheFromWs(app.ws);
 }
 const saveWorkDebounced = debounce(saveWork, 600);
 
@@ -1165,6 +1239,117 @@ function restoreWork() {
     }
   };
   $("#discard").onclick = () => { try { localStorage.removeItem(WORK_KEY); } catch (e) { /* */ } box.remove(); };
+}
+
+/* =================== 4단계 수업 영상 =================== */
+function stageCandidates() {
+  const c = app.selected && app.selected.card;
+  let list = c ? orderedCandidates(c) : [];
+  const id = app.ws && app.ws.song.videoId;
+  if (id && !list.some((x) => x.id === id)) list = [{ id, title: app.ws.song.title, kind: "manual" }].concat(list);
+  else if (id) list = list.filter((x) => x.id === id).concat(list.filter((x) => x.id !== id));
+  return list;
+}
+function videoCollapsed() { try { return localStorage.getItem("popsong.vsCollapsed") === "1"; } catch (e) { return false; } }
+function mountVideoStage() {
+  const stage = $("#videoStage");
+  const list = stageCandidates();
+  if (!list.length) { stage.hidden = true; return; }
+  stage.hidden = app.view === "edit";
+  const collapsed = videoCollapsed();
+  stage.classList.toggle("collapsed", collapsed);
+  $("#vsToggle").textContent = collapsed ? "영상 펼치기 ▼" : "영상 접기 ▲";
+  $("#vsToggle").setAttribute("aria-expanded", String(!collapsed));
+  const cur = list[app.vsIndex || 0] || list[0];
+  $("#vsName").textContent = (cur.title || "") + (list.length > 1 ? ` (${(app.vsIndex || 0) + 1}/${list.length})` : "");
+  $("#vsLink").href = watchUrl(cur.id);
+  $("#vsNext").hidden = list.length < 2;
+  if (collapsed) { if (app.vsCtrl) { app.vsCtrl.destroy(); app.vsCtrl = null; } return; }
+  if (app.vsCtrl && app.vsCtrlId === cur.id) return;
+  if (app.vsCtrl) app.vsCtrl.destroy();
+  $("#vsMsg").textContent = "";
+  app.vsCtrl = mountPlayer($("#vsPlayer"), list.slice(app.vsIndex || 0).concat(list.slice(0, app.vsIndex || 0)), {
+    onSwitch: (next, reason) => { $("#vsMsg").textContent = `${reason} → 다른 영상으로 자동 전환했습니다.`; app.vsCtrlId = next.id; $("#vsLink").href = watchUrl(next.id); },
+    onFail: (reason) => { $("#vsMsg").textContent = `${reason} ‘YouTube ↗’ 버튼으로 열어 주세요.`; },
+  });
+  app.vsCtrlId = cur.id;
+  app.vsCtrl.play(0, false);
+}
+function destroyVideoStage() {
+  if (app.vsCtrl) { app.vsCtrl.destroy(); app.vsCtrl = null; app.vsCtrlId = null; }
+  const st = $("#videoStage");
+  if (st) st.hidden = true;
+}
+function initVideoStage() {
+  $("#vsToggle").addEventListener("click", () => {
+    try { localStorage.setItem("popsong.vsCollapsed", videoCollapsed() ? "0" : "1"); } catch (e) { /* */ }
+    mountVideoStage();
+  });
+  $("#vsNext").addEventListener("click", () => {
+    const n = stageCandidates().length;
+    app.vsIndex = ((app.vsIndex || 0) + 1) % n;
+    if (app.vsCtrl) { app.vsCtrl.destroy(); app.vsCtrl = null; }
+    try { localStorage.setItem("popsong.vsCollapsed", "0"); } catch (e) { /* */ }
+    mountVideoStage();
+  });
+}
+
+/* =================== 곡별 AI 결과 임시 보관 =================== */
+// 같은 곡을 다시 작업할 때 AI 곡 소개·표현 설명·해석·단어 뜻을 재사용(토큰 절약). 14일, 최근 15곡.
+const CACHE_KEY = "popsong.songcache.v1";
+const enKey = (t) => String(t || "").toLowerCase().replace(/[^a-z0-9']/g, "");
+function songKey(song) { return (song.title + "|" + song.artist).toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/[^a-z0-9가-힣|]/g, ""); }
+function readCacheAll() {
+  try {
+    const all = JSON.parse(localStorage.getItem(CACHE_KEY) || "{}");
+    const now = Date.now();
+    Object.keys(all).forEach((k) => { if (!all[k] || now - (all[k].t || 0) > 14 * 864e5) delete all[k]; });
+    return all;
+  } catch (e) { return {}; }
+}
+function getSongCache(song) { return song ? readCacheAll()[songKey(song)] || null : null; }
+function putSongCache(song, patch) {
+  if (!song || !song.title) return;
+  try {
+    const all = readCacheAll();
+    const k = songKey(song);
+    const cur = all[k] || { ko: {}, meanings: {}, tips: {} };
+    const next = { ...cur, ...patch, ko: { ...cur.ko, ...(patch.ko || {}) }, meanings: { ...cur.meanings, ...(patch.meanings || {}) }, tips: { ...cur.tips, ...(patch.tips || {}) }, t: Date.now() };
+    all[k] = next;
+    const keys = Object.keys(all).sort((a, b) => (all[b].t || 0) - (all[a].t || 0));
+    keys.slice(15).forEach((x) => delete all[x]);
+    localStorage.setItem(CACHE_KEY, JSON.stringify(all));
+  } catch (e) { /* 저장 공간 부족 등 무시 */ }
+}
+function clearSongCache(song) {
+  try { const all = readCacheAll(); delete all[songKey(song)]; localStorage.setItem(CACHE_KEY, JSON.stringify(all)); } catch (e) { /* */ }
+}
+/** 현재 활동지의 AI·교사 수정 내용을 곡 캐시에 반영 */
+function cacheFromWs(ws) {
+  if (!ws) return;
+  const ko = {};
+  ws.baseLines.forEach((l) => { if (l.en && l.ko) ko[enKey(l.en)] = l.ko; });
+  const meanings = {};
+  ws.blanks.forEach((b) => { if (b.meaning) meanings[b.answer.toLowerCase()] = { head: b.head, pos: b.pos, meaning: b.meaning }; });
+  const patch = { ko, meanings };
+  if (ws.info && ws.info.some((f) => f.label !== "가수" && f.value)) patch.info = ws.info;
+  if (ws.grammarTip && ws.grammar) patch.tips = { [ws.grammar.id + ":" + ws.grammar.label]: ws.grammarTip };
+  putSongCache(ws.song, patch);
+}
+function renderCacheNote() {
+  const box = $("#cacheNote");
+  if (!box) return;
+  const song = app.selected && app.selected.song;
+  const c = getSongCache(song);
+  if (!c) { box.hidden = true; return; }
+  const parts = [];
+  if (c.info) parts.push("곡 소개");
+  if (Object.keys(c.ko || {}).length) parts.push(`해석 ${Object.keys(c.ko).length}줄`);
+  if (Object.keys(c.meanings || {}).length) parts.push(`단어 뜻 ${Object.keys(c.meanings).length}개`);
+  if (!parts.length) { box.hidden = true; return; }
+  box.hidden = false;
+  box.innerHTML = `<span>💾 이 곡의 <b>${parts.join(" · ")}</b>을(를) 임시 보관 중입니다. 다시 만들 때 AI에 다시 요청하지 않습니다.</span><button type="button" class="btn sm ghost" id="cacheClear">보관 내용 지우기</button>`;
+  $("#cacheClear").onclick = () => { clearSongCache(song); renderCacheNote(); toast("이 곡의 보관 내용을 지웠습니다. 다음에는 AI가 새로 만듭니다.", "info"); };
 }
 
 /* =================== 유틸 =================== */

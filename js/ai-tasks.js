@@ -58,7 +58,7 @@ export async function recommendSongs({ grammar, grade, exclude = [], count = 6, 
  * @param lines 표시용 줄(반복 접기 반영)
  * @returns {blanks, info, grammarTip, grammarLines, translations, warnings}
  */
-export async function buildWorksheetWithAI({ song, grammar, grade, lines, blankCount, focus, needTranslation, signal }) {
+export async function buildWorksheetWithAI({ song, grammar, grade, lines, blankCount, focus, needTranslation, skipInfo = false, skipTip = false, signal }) {
   const lyricLines = lines.map((l, i) => ({ i, en: l.en, ko: l.ko, type: l.type })).filter((l) => l.type === "lyric" && l.en);
   const numbered = lyricLines.map((l) => `${l.i}: ${l.en}`).join("\n");
   const focusText = focus === "grammar" ? "빈칸의 절반 이상을 목표 표현과 직접 관련된 단어(예: 동사 형태, 조동사, 관계사)로" :
@@ -78,8 +78,8 @@ export async function buildWorksheetWithAI({ song, grammar, grade, lines, blankC
     "   word는 그 줄에 적힌 철자 그대로(대소문자 포함), headword는 사전형(예: drinks→drink, memories→memory; -ing형이 형용사/동명사로 쓰이면 그대로 둬도 됨).",
     "   pos는 n./v./a./ad./prep./conj./pron./phr. 중 하나, meaning은 이 곡의 문맥에 맞는 한국어 뜻(쉼표로 2개 이내).",
     "2. 목표 표현이 쓰인 구절을 grammarLines에 최대 8개(phrase는 그 줄의 정확한 일부, note는 한국어 10자 내외 설명).",
-    "3. grammarTip: 학생용으로 목표 표현의 형태와 뜻을 2문장 이내 한국어로 설명.",
-    "4. info: 활동지 상단 곡 소개. label은 '가수','발매','앨범','특징','배경' 순서. value는 각 1~2문장의 한국어. 확실하지 않은 사실은 쓰지 말고 빈 문자열로 둔다.",
+    skipTip ? "3. grammarTip은 빈 문자열로 둔다(이미 있음)." : "3. grammarTip: 학생용으로 목표 표현의 형태와 뜻을 2문장 이내 한국어로 설명.",
+    skipInfo ? "4. info는 빈 배열로 둔다(이미 있음)." : "4. info: 활동지 상단 곡 소개. label은 '가수','발매','앨범','특징','배경' 순서. value는 각 1~2문장의 한국어. 확실하지 않은 사실은 쓰지 말고 빈 문자열로 둔다.",
     "",
     '형식: {"blanks":[{"line":0,"word":"","headword":"","pos":"","meaning":"","type":"vocab|grammar"}],"grammarLines":[{"line":0,"phrase":"","note":""}],"grammarTip":"","info":[{"label":"","value":""}]}',
   ].join("\n");
@@ -170,6 +170,35 @@ export async function translateLines({ song, items, signal }) {
     const n = byKey.get(keyOf(it.en));
     if (n != null && byN[n]) out[it.i] = byN[n];
   });
+  return out;
+}
+
+/**
+ * 구간 표시가 없는 가사에 [Verse 1] [Chorus] 등을 붙이기 위한 구간 시작 줄 찾기
+ * @param items [{i, en}] 영어 가사 줄(순서대로)
+ * @returns [{start: i, label}]
+ */
+export async function labelSections({ song, items, signal }) {
+  const prompt = [
+    `곡: ${song.title} - ${song.artist}`,
+    "다음은 구간 표시 없이 붙여 넣은 영어 가사다. 줄 번호를 보고 각 구간이 시작되는 줄과 이름을 정하라.",
+    "이름은 Intro, Verse 1, Verse 2, Pre-Chorus, Chorus, Post-Chorus, Bridge, Outro 중에서 고르고, 같은 후렴이 반복되면 매번 같은 이름(Chorus)을 쓴다.",
+    "첫 구간은 반드시 첫 줄에서 시작한다. 가사 내용을 다시 쓰지 말고 줄 번호만 답한다.",
+    items.map((l) => `${l.i}: ${l.en}`).join("\n"),
+    "",
+    '형식(JSON): {"sections":[{"start":0,"label":"Verse 1"}]}',
+  ].join("\n");
+  const data = await generateJSON({ system: SYSTEM_TEACHER, prompt, maxTokens: 1200, signal });
+  const valid = new Set(items.map((l) => l.i));
+  const out = [];
+  (Array.isArray(data.sections) ? data.sections : []).forEach((sec) => {
+    const st = Number(sec.start);
+    const label = String(sec.label || "").replace(/[\[\]]/g, "").trim().slice(0, 24);
+    if (!valid.has(st) || !label) return;
+    if (out.length && st <= out[out.length - 1].start) return;
+    out.push({ start: st, label });
+  });
+  if (out.length && out[0].start !== items[0].i) out[0].start = items[0].i;
   return out;
 }
 

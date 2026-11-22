@@ -41,7 +41,7 @@ export async function exportDocx(ws, qrDataUrl) {
   const FONT = { ascii: "Arial", hAnsi: "Arial", eastAsia: "Malgun Gothic", cs: "Arial" };
   const pt = (n) => Math.round(n * 2);
   const base = ws.options.fontSize || 10;
-  const NAVY = "1B7A43"; // 포인트 색(초록)
+  const NAVY = "006241"; // 포인트 색(진초록)
   const GRAY = "666666";
   const PAGE = { size: { width: 11906, height: 16838 }, margin: { top: 680, bottom: 680, left: 720, right: 720 } };
   const CONTENT_W = 11906 - 1440;
@@ -68,12 +68,12 @@ export async function exportDocx(ws, qrDataUrl) {
     new TableRow({ children: [
       cell(para(run("Let's Sing", { bold: true, size: base + 3, color: "FFFFFF" }), { align: AlignmentType.CENTER }), { w: 1500, rowSpan: 2, fill: NAVY }),
       cell(para(run(ws.song.title, { bold: true, size: base + 6, color: NAVY }), { align: AlignmentType.CENTER }), { w: 5400 }),
-      cell(para(run("학번", { bold: true }), { align: AlignmentType.CENTER }), { w: 1000, fill: "EAF6EE" }),
+      cell(para(run("학번", { bold: true }), { align: AlignmentType.CENTER }), { w: 1000, fill: "E4F0EA" }),
       cell(para(run("")), { w: CONTENT_W - 7900 }),
     ] }),
     new TableRow({ children: [
       cell(para(run(ws.song.artist, { bold: true, size: base + 1, color: "333333" }), { align: AlignmentType.CENTER }), { w: 5400 }),
-      cell(para(run("이름", { bold: true }), { align: AlignmentType.CENTER }), { w: 1000, fill: "EAF6EE" }),
+      cell(para(run("이름", { bold: true }), { align: AlignmentType.CENTER }), { w: 1000, fill: "E4F0EA" }),
       cell(para(run("")), { w: CONTENT_W - 7900 }),
     ] }),
   ], [1500, 5400, 1000, CONTENT_W - 7900]);
@@ -88,7 +88,7 @@ export async function exportDocx(ws, qrDataUrl) {
     infoRowCells.push(cell([
       new Paragraph({ alignment: AlignmentType.CENTER, children: [new ImageRun({ type: "png", data: dataUrlToBytes(qrDataUrl), transformation: { width: 78, height: 78 } })] }),
       para(run("영상 QR", { size: 7.5, color: GRAY }), { align: AlignmentType.CENTER, after: 0 }),
-    ], { w: 1500, fill: "F5FAF6" }));
+    ], { w: 1500, fill: "F3F8F5" }));
   }
   infoRowCells.push(cell(infoParas.length ? infoParas : [para(run(""))], { w: qrDataUrl ? CONTENT_W - 1500 : CONTENT_W, vAlign: VerticalAlign.TOP, pad: 80 }));
   const info = table([new TableRow({ children: infoRowCells })], qrDataUrl ? [1500, CONTENT_W - 1500] : [CONTENT_W]);
@@ -129,9 +129,9 @@ export async function exportDocx(ws, qrDataUrl) {
   const vocabTable = (answer) => {
     const W = [380, 1420, 1688]; // 3묶음 합계 = 본문 폭, 학생이 쓰는 칸을 넉넉히
     const header = new TableRow({ tableHeader: true, children: [0, 1, 2].flatMap(() => [
-      cell(para(run(""), { after: 0 }), { w: W[0], fill: "EAF6EE" }),
-      cell(para(run("단어", { bold: true, color: NAVY }), { align: AlignmentType.CENTER, after: 0 }), { w: W[1], fill: "EAF6EE" }),
-      cell(para(run("뜻", { bold: true, color: NAVY }), { align: AlignmentType.CENTER, after: 0 }), { w: W[2], fill: "EAF6EE" }),
+      cell(para(run(""), { after: 0 }), { w: W[0], fill: "E4F0EA" }),
+      cell(para(run("단어", { bold: true, color: NAVY }), { align: AlignmentType.CENTER, after: 0 }), { w: W[1], fill: "E4F0EA" }),
+      cell(para(run("뜻", { bold: true, color: NAVY }), { align: AlignmentType.CENTER, after: 0 }), { w: W[2], fill: "E4F0EA" }),
     ]) });
     const rows = threeColumnRows(vocabCheckRows(ws)).map((r) => new TableRow({ height: { value: 540, rule: HeightRule.ATLEAST }, children: r.flatMap((it) => {
       if (!it) return [cell(para(run(""), { after: 0 }), { w: W[0] }), cell(para(run(""), { after: 0 }), { w: W[1] }), cell(para(run(""), { after: 0 }), { w: W[2] })];
@@ -140,9 +140,9 @@ export async function exportDocx(ws, qrDataUrl) {
       const wRed = answer && it.show === "meaning";
       const mRed = answer && it.show === "word";
       return [
-        cell(para(run(it.num, { bold: true, size: base - 1 }), { align: AlignmentType.CENTER, after: 0 }), { w: W[0], fill: "F5FAF6" }),
-        cell(para([run(it.pos ? it.pos + " " : "", { size: base - 2.5, color: GRAY }), run(showW ? it.head : "", { bold: true, color: wRed ? "C00000" : undefined })], { align: AlignmentType.CENTER, after: 0 }), { w: W[1] }),
-        cell(para(run(showM ? it.meaning : "", { size: base - 1, color: mRed ? "C00000" : undefined, bold: mRed }), { align: AlignmentType.CENTER, after: 0 }), { w: W[2] }),
+        cell(para(run(it.num, { bold: true, size: base - 1 }), { align: AlignmentType.CENTER, after: 0 }), { w: W[0], fill: "F3F8F5" }),
+        cell(para([run(it.pos ? it.pos + " " : "", { size: base - 2.5, color: GRAY }), run(showW ? it.head : "", { bold: true, color: wRed ? "C00000" : undefined })], { align: AlignmentType.LEFT, after: 0 }), { w: W[1] }),
+        cell(para(run(showM ? it.meaning : "", { size: base - 1, color: mRed ? "C00000" : undefined, bold: mRed }), { align: AlignmentType.LEFT, after: 0 }), { w: W[2] }),
       ];
     }) }));
     return table([header, ...rows], [...W, ...W, ...W]);
@@ -168,7 +168,7 @@ export async function exportDocx(ws, qrDataUrl) {
       const A = "ABCDEFGHIJKLMNOPQRSTUVWXYZ".split("");
       const kw = Math.floor(CONTENT_W / 13);
       const keyRows = [A.slice(0, 13), A.slice(13)].flatMap((part, pi) => [
-        new TableRow({ children: part.map((k) => cell(para(run(k, { bold: true }), { align: AlignmentType.CENTER, after: 0 }), { w: kw, fill: "EAF6EE", pad: 25 })) }),
+        new TableRow({ children: part.map((k) => cell(para(run(k, { bold: true }), { align: AlignmentType.CENTER, after: 0 }), { w: kw, fill: "E4F0EA", pad: 25 })) }),
         new TableRow({ children: part.map((k, i) => cell(para(run(i + 1 + pi * 13), { align: AlignmentType.CENTER, after: 0 }), { w: kw, pad: 25 })) }),
       ]);
       out.push(table(keyRows, Array(13).fill(kw)));
@@ -188,21 +188,39 @@ export async function exportDocx(ws, qrDataUrl) {
       }
     } else {
       const isMissing = game.type === "missing";
+      const ordered = isMissing && game.phrase;
       const half = Math.floor(CONTENT_W / 2) - 60;
-      const W = [Math.round(half * 0.1), Math.round(half * 0.36), Math.round(half * 0.25)];
-      W.push(half - W[0] - W[1] - W[2]);
+      const W = ordered
+        ? [Math.round(half * 0.09), Math.round(half * 0.09), Math.round(half * 0.32), Math.round(half * 0.25)]
+        : [Math.round(half * 0.1), Math.round(half * 0.36), Math.round(half * 0.25)];
+      W.push(half - W.reduce((x, y) => x + y, 0));
+      const heads = (ordered ? ["순서"] : []).concat(["No", isMissing ? "단어" : "섞인 철자", "뜻", isMissing ? "빠진 철자" : "정답"]);
       const mk = (items) => {
-        const headRow = new TableRow({ tableHeader: true, children: ["No.", isMissing ? "단어" : "섞인 철자", "뜻", isMissing ? "빠진 철자" : "정답"].map((h, i) => cell(para(run(h, { bold: true, color: NAVY, size: base - 1 }), { align: AlignmentType.CENTER, after: 0 }), { w: W[i], fill: "EAF6EE" })) });
+        const headRow = new TableRow({ tableHeader: true, children: heads.map((h, i) => cell(para(run(h, { bold: true, color: NAVY, size: base - 1 }), { align: AlignmentType.CENTER, after: 0 }), { w: W[i], fill: "E4F0EA" })) });
         const rows = items.map((it) => new TableRow({ height: { value: 500, rule: HeightRule.ATLEAST }, children: [
-          cell(para(run(it.num, { bold: true }), { align: AlignmentType.CENTER, after: 0 }), { w: W[0], fill: "F5FAF6" }),
-          cell(para(run(isMissing ? (answer ? it.word : it.shown) : it.shuffled, { bold: true }), { align: AlignmentType.CENTER, after: 0 }), { w: W[1] }),
-          cell(para(run(it.meaning || "", { size: base - 1 }), { align: AlignmentType.CENTER, after: 0 }), { w: W[2] }),
-          cell(para(run(answer ? (isMissing ? it.missing : it.word) : "", { bold: true, color: RED }), { align: AlignmentType.CENTER, after: 0 }), { w: W[3] }),
+          ...(ordered ? [cell(para(run(it.order, { bold: true, color: NAVY }), { align: AlignmentType.CENTER, after: 0 }), { w: W[0], fill: "F3F8F5" })] : []),
+          cell(para(run(it.num, { bold: true }), { align: AlignmentType.CENTER, after: 0 }), { w: W[ordered ? 1 : 0], fill: "F3F8F5" }),
+          cell(para(run(isMissing ? (answer ? it.word : it.shown.split("").join(" ")) : it.shuffled, { bold: true }), { align: AlignmentType.LEFT, after: 0 }), { w: W[ordered ? 2 : 1] }),
+          cell(para(run(it.meaning || "", { size: base - 1 }), { align: AlignmentType.LEFT, after: 0 }), { w: W[ordered ? 3 : 2] }),
+          cell(para(run(answer ? (isMissing ? it.missing : it.word) : "", { bold: true, color: RED }), { align: AlignmentType.LEFT, after: 0 }), { w: W[ordered ? 4 : 3] }),
         ] }));
         return [table([headRow, ...rows], W)];
       };
       const [a, b] = halves(game.items);
       out.push(twoCol(mk(a), b.length ? mk(b) : []));
+      if (ordered) {
+        out.push(para([run("[ 비밀 구절 ] ", { bold: true, color: NAVY }), run("빠진 철자를 순서대로 모아 가사 속 구절을 완성하세요.")], { before: 140 }));
+        let k = 0;
+        const groups = game.phraseWords.map((n) => Array.from({ length: n }, () => game.items[k++]));
+        const flat = [];
+        groups.forEach((g, gi) => { g.forEach((it) => flat.push(it)); if (gi < groups.length - 1) flat.push(null); });
+        const bw = Math.min(560, Math.floor(CONTENT_W / flat.length));
+        out.push(table([
+          new TableRow({ children: flat.map((it) => it ? cell(para(run(it.order, { size: 6.5, color: GRAY }), { after: 0 }), { w: bw, pad: 10 }) : new TableCell({ children: [para(run(""))], width: { size: bw, type: WidthType.DXA }, borders: noBorder })) }),
+          new TableRow({ height: { value: 420, rule: HeightRule.ATLEAST }, children: flat.map((it) => it ? cell(para(run(answer ? it.missing : "", { bold: true, color: RED, size: base + 2 }), { align: AlignmentType.CENTER, after: 0 }), { w: bw, pad: 10 }) : new TableCell({ children: [para(run(""))], width: { size: bw, type: WidthType.DXA }, borders: noBorder })) }),
+        ], Array(flat.length).fill(bw)));
+        out.push(para(run(answer ? "정답: " + game.phrase : "구절: ________________________________", { bold: answer, color: answer ? RED : undefined }), { before: 100 }));
+      }
     }
     return out;
   };
@@ -226,7 +244,7 @@ export async function exportDocx(ws, qrDataUrl) {
 
   const ansW = [500, CONTENT_W / 3 - 500];
   const ansTable = table(threeColumnRows(v).map((r) => new TableRow({ children: r.flatMap((it) => [
-    cell(para(run(it ? it.num + ")" : "", { bold: true }), { align: AlignmentType.CENTER, after: 0 }), { w: ansW[0], fill: "F5FAF6" }),
+    cell(para(run(it ? it.num + ")" : "", { bold: true }), { align: AlignmentType.CENTER, after: 0 }), { w: ansW[0], fill: "F3F8F5" }),
     cell(para(run(it ? it.answer : "", { bold: true, color: "C00000" }), { after: 0 }), { w: Math.round(ansW[1]) }),
   ]) })), [ansW[0], Math.round(ansW[1]), ansW[0], Math.round(ansW[1]), ansW[0], Math.round(ansW[1])]);
 

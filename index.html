@@ -20,9 +20,14 @@
 
   <header class="topbar">
     <div class="topbar-in">
-      <a class="brand" href="./" aria-label="처음으로">
-        <span class="logo" aria-hidden="true">♪</span>
-        <span class="brand-t"><b>팝송 문법 활동지</b><small>2022 개정 교육과정 언어 형식 기반</small></span>
+      <a class="brand" href="./" aria-label="팝송 문법 활동지 처음으로">
+        <span class="logo" aria-hidden="true">
+          <svg viewBox="0 0 32 32" width="22" height="22"><path fill="currentColor" d="M12 23.5a4.5 4.5 0 1 1-3-4.24V8.6a1.5 1.5 0 0 1 1.13-1.45l12-3A1.5 1.5 0 0 1 24 5.6v14.9a4.5 4.5 0 1 1-3-4.24V10.3l-9 2.25z"/></svg>
+        </span>
+        <span class="brand-t">
+          <b>팝송 문법 활동지</b>
+          <small>2022 개정 교육과정 언어 형식 · 영상 · 활동지 · 정답 확인</small>
+        </span>
       </a>
       <button type="button" id="apiPill" class="api-pill st-none" aria-controls="settingsPanel" aria-expanded="false">
         <span class="dot" aria-hidden="true"></span>
@@ -44,10 +49,14 @@
   <main id="main">
     <!-- AI 연결 설정 -->
     <section id="settingsPanel" class="card settings" hidden aria-labelledby="setTitle">
-      <div class="card-h">
+      <div class="card-h set-head">
         <h2 id="setTitle">AI 연결 설정 <span class="opt">선택 사항</span></h2>
-        <button type="button" class="icon-btn" id="settingsClose" aria-label="설정 닫기">×</button>
+        <div class="set-sum">
+          <span class="api-mini st-none" id="apiMini"><span class="dot"></span><b>키 미설정</b></span>
+          <button type="button" class="btn sm ghost" id="settingsToggle" aria-expanded="true" aria-controls="settingsBody">접기</button>
+        </div>
       </div>
+      <div id="settingsBody">
       <p class="muted">키가 없어도 <b>기본 곡 목록 + 자동 빈칸</b>으로 사용할 수 있습니다. 키를 연결하면 곡 추천, 가사 해석, 단어 뜻, 곡 소개를 AI가 만들어 줍니다.</p>
       <div class="form-grid">
         <label class="field">
@@ -92,6 +101,7 @@
         <label class="field"><span>YouTube Data API 키</span><input id="ytKey" type="password" autocomplete="off" spellcheck="false" placeholder="AIza... (선택)"></label>
       </details>
       <p class="muted small privacy">🔒 키는 이 브라우저에만 저장되며(‘기억하기’를 끄면 탭을 닫을 때 삭제), 요청할 때만 AI 제공사로 전달됩니다. 사이트 서버에는 저장하지 않습니다.</p>
+      </div>
     </section>
 
     <!-- 1단계 -->
@@ -177,11 +187,13 @@
 • 한글 해석이 영어 줄 바로 아래 있으면 자동으로 짝지어집니다.
 • 해석이 없는 줄은 AI 연결 시 자동으로 번역합니다."></textarea>
           <div class="tr-row">
+            <button type="button" class="btn sm" id="secBtn">🏷 AI 구간 표시 붙이기</button>
             <button type="button" class="btn sm" id="trBtn">🪄 AI 해석 채우기</button>
             <button type="button" class="btn sm ghost" id="trUndo" hidden>↶ 되돌리기</button>
             <span class="muted small" id="trHint">영어 줄 바로 아래에 해석이 들어갑니다. 확인하고 그 자리에서 고치면 그대로 활동지에 쓰입니다.</span>
           </div>
           <p class="lyr-stat muted small" id="lyrStat" aria-live="polite"></p>
+          <div id="cacheNote" class="cache-note" hidden></div>
           <p class="muted small">※ 가사는 저작권이 있으므로 수업 목적 범위에서 사용해 주세요. 이 사이트는 가사를 저장하거나 공개하지 않습니다(작업 내용은 이 브라우저에만 임시 저장).</p>
 
           <h3 class="h3">활동지 옵션</h3>
@@ -222,6 +234,17 @@
         </div>
       </div>
       <div id="s4Notice"></div>
+      <section class="video-stage" id="videoStage" hidden aria-label="수업 영상">
+        <div class="vs-head">
+          <div class="vs-title"><span class="vs-ic" aria-hidden="true">▶</span><b>수업 영상</b><span id="vsName" class="muted"></span></div>
+          <div class="vs-act">
+            <button type="button" class="btn sm ghost" id="vsNext">다른 영상</button>
+            <a class="btn sm ghost" id="vsLink" href="#" target="_blank" rel="noopener">YouTube ↗</a>
+            <button type="button" class="btn sm" id="vsToggle" aria-expanded="true" aria-controls="vsBody">영상 접기 ▲</button>
+          </div>
+        </div>
+        <div class="vs-body" id="vsBody"><div class="vs-frame"><div id="vsPlayer" class="player-box"></div></div><div class="vs-msg muted small" id="vsMsg"></div></div>
+      </section>
       <div class="tabs" role="tablist" aria-label="보기 선택">
         <button type="button" role="tab" id="tab-preview" aria-selected="true" aria-controls="view-preview">활동지 미리보기</button>
         <button type="button" role="tab" id="tab-online" aria-selected="false" aria-controls="view-online">온라인 정답 확인</button>
