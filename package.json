@@ -1,0 +1,10 @@
+{
+  "name": "popsong-grammar-worksheet",
+  "version": "2.0.0",
+  "private": true,
+  "description": "2022 개정 교육과정 언어 형식이 들어간 팝송 영상 추천과 가사 빈칸·단어 활동지 생성기",
+  "type": "module",
+  "scripts": {
+    "dev": "node dev-server.mjs"
+  }
+}

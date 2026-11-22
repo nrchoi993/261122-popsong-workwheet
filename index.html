@@ -1,0 +1,279 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <!-- YouTube Error 153(참조자 누락) 방지 -->
+  <meta name="referrer" content="strict-origin-when-cross-origin">
+  <meta name="description" content="2022 개정 교육과정 언어 형식이 들어간 팝송을 찾고, 가사 빈칸·단어 활동지를 만들어 내려받는 교사용 도구">
+  <meta name="theme-color" content="#1f4e79">
+  <title>팝송 문법 활동지 생성기</title>
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='14' fill='%231f4e79'/%3E%3Cpath d='M26 44a6 6 0 1 1-4-5.66V16l20-4v24a6 6 0 1 1-4-5.66V18.9l-12 2.4z' fill='%23fff'/%3E%3C/svg%3E">
+  <link rel="preconnect" href="https://cdn.jsdelivr.net">
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/variable/pretendardvariable-dynamic-subset.min.css">
+  <link rel="stylesheet" href="css/style.css">
+  <script src="vendor/qrcode.js" defer></script>
+  <script type="module" src="js/app.js"></script>
+</head>
+<body>
+  <a class="skip" href="#main">본문으로 건너뛰기</a>
+
+  <header class="topbar">
+    <div class="topbar-in">
+      <a class="brand" href="./" aria-label="처음으로">
+        <span class="logo" aria-hidden="true">♪</span>
+        <span class="brand-t"><b>팝송 문법 활동지</b><small>2022 개정 교육과정 언어 형식 기반</small></span>
+      </a>
+      <button type="button" id="apiPill" class="api-pill st-none" aria-controls="settingsPanel" aria-expanded="false">
+        <span class="dot" aria-hidden="true"></span>
+        <span class="pill-label">키 미설정</span>
+        <span class="pill-sub">AI 설정</span>
+      </button>
+    </div>
+  </header>
+
+  <nav class="stepper" aria-label="진행 단계">
+    <ol>
+      <li><button type="button" data-step="1" aria-current="step"><span class="n">1</span><span class="t">표현 선택</span></button></li>
+      <li><button type="button" data-step="2" disabled><span class="n">2</span><span class="t">영상 고르기</span></button></li>
+      <li><button type="button" data-step="3" disabled><span class="n">3</span><span class="t">가사·옵션</span></button></li>
+      <li><button type="button" data-step="4" disabled><span class="n">4</span><span class="t">확인·다운로드</span></button></li>
+    </ol>
+  </nav>
+
+  <main id="main">
+    <!-- AI 연결 설정 -->
+    <section id="settingsPanel" class="card settings" hidden aria-labelledby="setTitle">
+      <div class="card-h">
+        <h2 id="setTitle">AI 연결 설정 <span class="opt">선택 사항</span></h2>
+        <button type="button" class="icon-btn" id="settingsClose" aria-label="설정 닫기">×</button>
+      </div>
+      <p class="muted">키가 없어도 <b>기본 곡 목록 + 자동 빈칸</b>으로 사용할 수 있습니다. 키를 연결하면 곡 추천, 가사 해석, 단어 뜻, 곡 소개를 AI가 만들어 줍니다.</p>
+      <div class="form-grid">
+        <label class="field">
+          <span>1. AI 제공사</span>
+          <select id="provider">
+            <option value="openai">OpenAI (ChatGPT)</option>
+            <option value="anthropic">Anthropic (Claude)</option>
+            <option value="gemini">Google (Gemini)</option>
+          </select>
+        </label>
+        <label class="field grow">
+          <span>2. API 키</span>
+          <span class="input-row">
+            <input id="apiKey" type="password" autocomplete="off" spellcheck="false" placeholder="sk-... 를 붙여 넣으세요">
+            <button type="button" class="btn ghost sm" id="toggleKey" aria-pressed="false">보기</button>
+          </span>
+          <small class="hint" id="keyHint"></small>
+        </label>
+        <label class="field">
+          <span>3. 모델</span>
+          <span class="input-row">
+            <select id="model"><option value="">자동 선택</option></select>
+            <button type="button" class="btn ghost sm" id="refreshModels" title="내 키로 사용할 수 있는 모델 목록 불러오기">목록</button>
+          </span>
+          <small class="hint">빠르고 저렴한 모델이 맨 위에 옵니다.</small>
+        </label>
+      </div>
+      <div id="mismatch" class="notice warn" hidden></div>
+      <div class="set-actions">
+        <button type="button" class="btn primary" id="testConn">연결 확인</button>
+        <label class="check"><input type="checkbox" id="remember"> 이 브라우저에 키 기억하기</label>
+        <a class="link" id="keyPage" href="https://platform.openai.com/api-keys" target="_blank" rel="noopener">키 발급 페이지 ↗</a>
+      </div>
+      <div class="api-status st-none" id="apiStatus" aria-live="polite">
+        <span class="badge"><span class="dot"></span><b id="apiStatusLabel">키 미설정</b></span>
+        <span id="apiStatusText">AI 키 없이도 기본 기능을 사용할 수 있습니다.</span>
+        <details id="apiStatusDetailWrap" hidden><summary>자세한 오류 내용</summary><code id="apiStatusDetail"></code></details>
+      </div>
+      <details class="more">
+        <summary>YouTube 검색 정확도 높이기 (선택)</summary>
+        <p class="muted small">YouTube Data API v3 키가 있으면 공식 검색 API로 영상을 찾습니다. 없으면 YouTube 검색 결과에서 찾고, 실제로 사이트에 삽입 가능한 영상만 보여 줍니다.</p>
+        <label class="field"><span>YouTube Data API 키</span><input id="ytKey" type="password" autocomplete="off" spellcheck="false" placeholder="AIza... (선택)"></label>
+      </details>
+      <p class="muted small privacy">🔒 키는 이 브라우저에만 저장되며(‘기억하기’를 끄면 탭을 닫을 때 삭제), 요청할 때만 AI 제공사로 전달됩니다. 사이트 서버에는 저장하지 않습니다.</p>
+    </section>
+
+    <!-- 1단계 -->
+    <section class="step" id="step1" aria-labelledby="s1Title">
+      <div class="card">
+        <div class="card-h"><h2 id="s1Title"><span class="sn">1</span>가르칠 표현 선택</h2></div>
+        <div class="search-wrap">
+          <label for="gq" class="sr-only">표현 검색</label>
+          <div class="search-box">
+            <span class="s-ic" aria-hidden="true">🔍</span>
+            <input id="gq" type="search" role="combobox" aria-expanded="false" aria-controls="gList" aria-autocomplete="list" autocomplete="off" placeholder="예: 수동태, to부정사, 현재완료, used to, 가정법, 관계대명사">
+            <button type="button" class="btn ghost sm" id="gClear" hidden>지우기</button>
+          </div>
+          <ul id="gList" class="suggest" role="listbox" hidden></ul>
+        </div>
+        <div class="quick" id="quickChips" aria-label="자주 쓰는 표현"></div>
+        <details class="browse" id="browse">
+          <summary>교육과정 [별표 4] 40개 범주에서 찾아보기</summary>
+          <div id="catList" class="cat-list"></div>
+        </details>
+
+        <div id="selGrammar" class="sel-grammar" hidden></div>
+
+        <div class="s1-foot">
+          <label class="field inline">
+            <span>적용 학년</span>
+            <select id="grade"></select>
+          </label>
+          <button type="button" class="btn primary lg" id="findBtn" disabled>영상 찾기 →</button>
+        </div>
+        <p class="muted small" id="s1Hint">표현을 고르면 그 표현이 들어간 곡의 YouTube 영상을 먼저 보여 드립니다. 활동지는 곡을 고른 다음에 만듭니다.</p>
+      </div>
+    </section>
+
+    <!-- 2단계 -->
+    <section class="step" id="step2" hidden aria-labelledby="s2Title">
+      <div class="step-h">
+        <div>
+          <h2 id="s2Title"><span class="sn">2</span>영상 고르기</h2>
+          <p class="muted" id="s2Sub"></p>
+        </div>
+        <div class="step-h-act">
+          <button type="button" class="btn ghost" data-go="1">← 표현 다시 고르기</button>
+          <button type="button" class="btn" id="moreSongs" hidden>AI로 더 추천받기</button>
+        </div>
+      </div>
+      <div id="s2Notice"></div>
+      <div id="songGrid" class="song-grid"></div>
+      <details class="card manual-song">
+        <summary>원하는 곡이 없나요? 곡을 직접 입력하기</summary>
+        <div class="form-grid">
+          <label class="field"><span>곡 제목</span><input id="mTitle" type="text" placeholder="예: Count on Me"></label>
+          <label class="field"><span>가수</span><input id="mArtist" type="text" placeholder="예: Bruno Mars"></label>
+          <label class="field grow"><span>YouTube 주소 (선택)</span><input id="mUrl" type="url" placeholder="https://www.youtube.com/watch?v=..."></label>
+        </div>
+        <button type="button" class="btn" id="mAdd">이 곡으로 진행</button>
+      </details>
+    </section>
+
+    <!-- 3단계 -->
+    <section class="step" id="step3" hidden aria-labelledby="s3Title">
+      <div class="step-h">
+        <div>
+          <h2 id="s3Title"><span class="sn">3</span>가사 넣고 활동지 옵션 정하기</h2>
+          <p class="muted" id="s3Sub"></p>
+        </div>
+        <div class="step-h-act"><button type="button" class="btn ghost" data-go="2">← 다른 곡 고르기</button></div>
+      </div>
+      <div class="s3-grid">
+        <aside class="card video-panel">
+          <div id="s3Player" class="player-box"></div>
+          <div id="s3PlayerBar" class="player-bar"></div>
+          <details class="paste-link">
+            <summary>다른 YouTube 영상 연결하기</summary>
+            <div class="input-row"><input id="s3Url" type="url" placeholder="YouTube 주소 붙여넣기"><button type="button" class="btn sm" id="s3UrlBtn">연결</button></div>
+          </details>
+        </aside>
+        <div class="card">
+          <div class="lyrics-h">
+            <label for="lyrics" class="h3">가사 붙여넣기</label>
+            <span class="lyr-links" id="lyrLinks"></span>
+          </div>
+          <textarea id="lyrics" rows="14" spellcheck="false" placeholder="영어 가사를 붙여 넣으세요.
+
+• [Verse 1], [Chorus] 같은 구간 표시는 그대로 두면 반복되는 후렴을 자동으로 접어 줍니다.
+• 한글 해석이 영어 줄 바로 아래 있으면 자동으로 짝지어집니다.
+• 해석이 없는 줄은 AI 연결 시 자동으로 번역합니다."></textarea>
+          <div class="tr-row">
+            <button type="button" class="btn sm" id="trBtn">🪄 AI 해석 채우기</button>
+            <button type="button" class="btn sm ghost" id="trUndo" hidden>↶ 되돌리기</button>
+            <span class="muted small" id="trHint">영어 줄 바로 아래에 해석이 들어갑니다. 확인하고 그 자리에서 고치면 그대로 활동지에 쓰입니다.</span>
+          </div>
+          <p class="lyr-stat muted small" id="lyrStat" aria-live="polite"></p>
+          <p class="muted small">※ 가사는 저작권이 있으므로 수업 목적 범위에서 사용해 주세요. 이 사이트는 가사를 저장하거나 공개하지 않습니다(작업 내용은 이 브라우저에만 임시 저장).</p>
+
+          <h3 class="h3">활동지 옵션</h3>
+          <div class="opt-grid">
+            <label class="field"><span>빈칸 수</span>
+              <select id="oCount"><option>10</option><option>15</option><option selected>20</option><option>25</option><option>30</option></select></label>
+            <label class="field"><span>빈칸 고르는 기준</span>
+              <select id="oFocus"><option value="mixed" selected>단어 + 표현 (추천)</option><option value="vocab">핵심 단어 중심</option><option value="grammar">오늘의 표현 중심</option></select></label>
+            <label class="field"><span>Part 1 단어 문제</span>
+              <select id="oVocab"><option value="mixed" selected>섞어서 (단어↔뜻)</option><option value="word">단어 보고 뜻 쓰기</option><option value="meaning">뜻 보고 단어 쓰기</option></select></label>
+            <label class="field"><span>Part 2 단어 활동</span>
+              <select id="oGame"><option value="wordsearch" selected>단어 찾기</option><option value="secret">비밀 암호</option><option value="missing">사라진 철자</option><option value="scramble">철자 섞기</option></select></label>
+          </div>
+          <div class="checks">
+            <label class="check"><input type="checkbox" id="oTrans" checked> 한글 해석 넣기</label>
+            <label class="check"><input type="checkbox" id="oCollapse" checked> 반복 후렴 접기</label>
+            <label class="check"><input type="checkbox" id="oHl" checked> 오늘의 표현 굵게·밑줄</label>
+          </div>
+          <div class="gen-row">
+            <button type="button" class="btn primary lg" id="genBtn">활동지 만들기 →</button>
+            <span class="muted small" id="genHint"></span>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- 4단계 -->
+    <section class="step" id="step4" hidden aria-labelledby="s4Title">
+      <div class="step-h">
+        <div>
+          <h2 id="s4Title"><span class="sn">4</span>확인하고 내려받기</h2>
+          <p class="muted" id="s4Sub"></p>
+        </div>
+        <div class="step-h-act">
+          <button type="button" class="btn ghost" data-go="3">← 가사·옵션 수정</button>
+          <button type="button" class="btn" id="printBtn">인쇄 / PDF</button>
+          <button type="button" class="btn primary" id="docxBtn">DOCX 다운로드</button>
+        </div>
+      </div>
+      <div id="s4Notice"></div>
+      <div class="tabs" role="tablist" aria-label="보기 선택">
+        <button type="button" role="tab" id="tab-preview" aria-selected="true" aria-controls="view-preview">활동지 미리보기</button>
+        <button type="button" role="tab" id="tab-online" aria-selected="false" aria-controls="view-online">온라인 정답 확인</button>
+        <button type="button" role="tab" id="tab-edit" aria-selected="false" aria-controls="view-edit">빈칸·단어 편집</button>
+      </div>
+      <div class="view-tools" id="viewTools">
+        <div class="tool-group" id="fontTools">
+          <span class="tl">글자</span>
+          <button type="button" class="btn sm ghost" id="fontDown" aria-label="글자 작게">A−</button>
+          <span id="fontVal" class="fv">10pt</span>
+          <button type="button" class="btn sm ghost" id="fontUp" aria-label="글자 크게">A+</button>
+          <button type="button" class="btn sm" id="fitBtn">1쪽에 맞추기</button>
+        </div>
+        <div class="tool-group">
+          <label class="check"><input type="checkbox" id="tTrans"> 해석</label>
+          <label class="check"><input type="checkbox" id="tHl"> 표현 강조</label>
+          <label class="check"><input type="checkbox" id="tCollapse"> 후렴 접기</label>
+        </div>
+        <div class="tool-group">
+          <select id="tVocab" aria-label="Part 1 형식"><option value="mixed">Part 1: 섞어서</option><option value="word">Part 1: 단어→뜻</option><option value="meaning">Part 1: 뜻→단어</option></select>
+          <select id="tGame" aria-label="Part 2 활동"><option value="wordsearch">Part 2: 단어 찾기</option><option value="secret">Part 2: 비밀 암호</option><option value="missing">Part 2: 사라진 철자</option><option value="scramble">Part 2: 철자 섞기</option></select>
+          <button type="button" class="btn sm ghost" id="reshuffle" title="Part 2를 새로 섞기">다시 섞기</button>
+        </div>
+      </div>
+      <div class="view" id="view-preview" role="tabpanel" aria-labelledby="tab-preview">
+        <div id="pages" class="pages"></div>
+      </div>
+      <div class="view" id="view-online" role="tabpanel" aria-labelledby="tab-online" hidden></div>
+      <div class="view" id="view-edit" role="tabpanel" aria-labelledby="tab-edit" hidden></div>
+    </section>
+  </main>
+
+  <footer class="foot">
+    <p>언어 형식 목록: 2022 개정 영어과 교육과정 [별표 4] 의사소통에 필요한 언어 형식 · 가사는 교사가 직접 입력하며 저장·공개되지 않습니다.</p>
+  </footer>
+
+  <!-- 진행 팝업 -->
+  <div id="loadingPop" class="pop" hidden>
+    <div class="pop-card" role="dialog" aria-modal="true" aria-labelledby="lpTitle" aria-describedby="lpMsg">
+      <div class="eq" aria-hidden="true"><i></i><i></i><i></i><i></i><i></i></div>
+      <h3 id="lpTitle">처리 중입니다</h3>
+      <p id="lpMsg" class="lp-msg" aria-live="polite"></p>
+      <ul id="lpSteps" class="lp-steps"></ul>
+      <p class="lp-meta"><span>경과 <b id="lpTime">0초</b></span></p>
+      <p id="lpTip" class="lp-tip"></p>
+      <button type="button" class="btn ghost" id="lpCancel">취소</button>
+    </div>
+  </div>
+  <div id="toasts" class="toasts" aria-live="polite"></div>
+  <div id="printRoot" aria-hidden="true"></div>
+</body>
+</html>
