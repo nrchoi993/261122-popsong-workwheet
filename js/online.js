@@ -61,15 +61,20 @@ function part2HTML(ws, game) {
     return `<div class="p2-key">${"ABCDEFGHIJKLMNOPQRSTUVWXYZ".split("").map((k, i) => `<span><b>${k}</b>${i + 1}</span>`).join("")}</div><div class="p2-grid">${easy}</div>${hard ? `<div class="p2-grid">${hard}</div>` : ""}`;
   }
   if (game.type === "missing") {
-    const items = game.items.map((it, i) => `<div class="p2q"><button type="button" class="vq-n" data-peek title="정답 보기">${game.phrase ? it.order : it.num}</button><div class="p2p">${game.phrase ? `<small class="muted">${it.num}번</small> ` : ""}<span class="mono">${esc(it.shown)}</span> <span class="muted">${esc(it.meaning || "")}</span></div><input ${inputAttrs(it.missing, (game.phrase ? it.order + "번째 " : it.num + "번 ") + "빠진 철자", `data-sec="p2" data-kind="word" data-ml="${i}" maxlength="2" class="letter" placeholder="?"`)}><span class="vq-r"></span></div>`).join("");
+    const items = game.items.map((it, i) => {
+      const k = it.shown.indexOf("_");
+      const pre = esc(it.shown.slice(0, k)), post = esc(it.shown.slice(k + 1));
+      const slot = `<input ${inputAttrs(it.missing, (game.phrase ? it.order + "번째 " : it.num + "번 ") + "빠진 철자", `data-sec="p2" data-kind="word" data-ml="${i}" maxlength="1" class="slot"`)}>`;
+      return `<div class="mlq"><button type="button" class="vq-n" data-peek title="정답 보기">${game.phrase ? it.order : it.num}</button><div class="mlw"><span class="ml-word">${pre}${slot}${post}</span><span class="ml-m">${game.phrase ? `<small>${it.num}번</small> ` : ""}${esc(it.meaning || "")}</span></div><span class="vq-r"></span></div>`;
+    }).join("");
     let box = "";
     if (game.phrase) {
       let k = 0;
-      const boxes = game.phraseWords.map((n) => `<span class="pw">${Array.from({ length: n }, () => { const i = k++; return `<span class="pb" data-pb="${i}"><i>${i + 1}</i><b></b></span>`; }).join("")}</span>`).join("");
-      box = `<div class="ol-phrase"><div class="sub">비밀 구절 — 빠진 철자를 순서대로 모아 보세요.</div><div class="pbs">${boxes}</div>
+      const boxes = game.phraseWords.map((n) => `<span class="pw">${Array.from({ length: n }, () => { const i = k++; return `<button type="button" class="pb" data-pb="${i}" data-ans="${esc(game.items[i].missing)}" title="눌러서 철자 보기"><i>${i + 1}</i><b></b></button>`; }).join("")}</span>`).join("");
+      box = `<div class="ol-phrase"><div class="sub">비밀 구절 — 빠진 철자를 순서대로 모아 보세요. <span class="muted small">(칸을 누르면 그 철자가 보입니다)</span></div><div class="pbs">${boxes}</div>
         <div class="p2q wide"><button type="button" class="vq-n" data-peek>구절</button><div class="p2p">완성한 가사 구절</div><input ${inputAttrs(game.phrase, "비밀 구절", 'data-sec="p2" data-kind="word" placeholder="예: If I ..."')}><span class="vq-r"></span></div></div>`;
     }
-    return `<div class="p2-grid">${items}</div>${box}`;
+    return `<p class="muted small">단어 속 빈칸에 빠진 철자를 쓰세요. ‘눌러서 정답 보기’ 모드에서는 빈칸을 누르면 철자가 나타납니다.</p><div class="ml-grid">${items}</div>${box}`;
   }
   return `<div class="p2-grid">${game.items.map((it) => `<div class="p2q"><button type="button" class="vq-n" data-peek>${it.num}</button><div class="p2p"><span class="mono">${esc(it.shuffled)}</span> <span class="muted">${esc(it.meaning || "")}</span></div><input ${inputAttrs(it.word, it.num + "번 단어", 'data-sec="p2" data-kind="word" placeholder="단어"')}><span class="vq-r"></span></div>`).join("")}</div>`;
 }
@@ -149,7 +154,12 @@ function gradeAll(root, wsState) {
 
 /* ---------- 연결 ---------- */
 
-export function bindOnline(root, ws, { onScale } = {}) {
+export function bindOnline(root, ws, { onScale, mode: initialMode } = {}) {
+  // 다시 그릴 때마다 이전 이벤트를 모두 해제(중복 등록되면 한 번 누를 때 여러 번 토글되어 정답이 안 보였음)
+  if (root._olCtrl) root._olCtrl.abort();
+  const ctrl = new AbortController();
+  root._olCtrl = ctrl;
+  const on = (type, fn) => root.addEventListener(type, fn, { signal: ctrl.signal });
   let mode = "solve";
   const scoreEl = root.querySelector(".ol-score");
   const online = root.querySelector(".online");
@@ -176,6 +186,7 @@ export function bindOnline(root, ws, { onScale } = {}) {
 
   const setMode = (m) => {
     mode = m;
+    if (onScale) onScale(null, m);
     root.querySelectorAll("[data-mode]").forEach((b) => { const on = b.dataset.mode === m; b.classList.toggle("on", on); b.setAttribute("aria-checked", String(on)); });
     root.querySelectorAll("input[data-answer]").forEach((inp) => { inp.readOnly = m === "peek"; });
     online.classList.toggle("peek-mode", m === "peek");
@@ -203,13 +214,17 @@ export function bindOnline(root, ws, { onScale } = {}) {
   function syncPhrase() {
     root.querySelectorAll("[data-pb]").forEach((pb) => {
       const inp = root.querySelector(`input[data-ml="${pb.dataset.pb}"]`);
-      pb.querySelector("b").textContent = inp ? String(inp.value || "").toUpperCase().slice(0, 1) : "";
+      const typed = inp ? String(inp.value || "").toUpperCase().slice(0, 1) : "";
+      pb.querySelector("b").textContent = pb.classList.contains("show") ? pb.dataset.ans : typed;
     });
   }
-  root.addEventListener("input", (e) => { if (e.target.matches("input[data-ml]")) syncPhrase(); });
+  on("input", (e) => { if (e.target.matches("input[data-ml]")) syncPhrase(); });
 
-  root.addEventListener("click", (e) => {
+  on("click", (e) => {
     const t = e.target;
+    // 비밀 구절 칸: 누를 때마다 그 칸의 정답 철자 보이기/숨기기
+    const pbox = t.closest("[data-pb]");
+    if (pbox) { pbox.classList.toggle("show"); syncPhrase(); return; }
     const pact = t.closest("[data-pact]");
     if (pact) {
       const sec = pact.closest(".ol-sec");
@@ -258,7 +273,7 @@ export function bindOnline(root, ws, { onScale } = {}) {
     }
   });
 
-  root.addEventListener("keydown", (e) => {
+  on("keydown", (e) => {
     if (e.key !== "Enter" || e.target.tagName !== "INPUT") return;
     e.preventDefault();
     const all = Array.from(root.querySelectorAll("input[data-answer]"));
@@ -304,5 +319,5 @@ export function bindOnline(root, ws, { onScale } = {}) {
     }
   }
 
-  setMode("solve");
+  setMode(initialMode || "solve");
 }

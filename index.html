@@ -6,7 +6,7 @@
   <!-- YouTube Error 153(참조자 누락) 방지 -->
   <meta name="referrer" content="strict-origin-when-cross-origin">
   <meta name="description" content="2022 개정 교육과정 언어 형식이 들어간 팝송을 찾고, 가사 빈칸·단어 활동지를 만들어 내려받는 교사용 도구">
-  <meta name="theme-color" content="#ffffff">
+  <meta name="theme-color" content="#006241">
   <title>팝송 문법 활동지 생성기</title>
   <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='14' fill='%2315803d'/%3E%3Cpath d='M26 44a6 6 0 1 1-4-5.66V16l20-4v24a6 6 0 1 1-4-5.66V18.9l-12 2.4z' fill='%23fff'/%3E%3C/svg%3E">
   <link rel="preconnect" href="https://cdn.jsdelivr.net">
@@ -256,7 +256,13 @@
           <button type="button" class="btn sm ghost" id="fontDown" aria-label="글자 작게">A−</button>
           <span id="fontVal" class="fv">10pt</span>
           <button type="button" class="btn sm ghost" id="fontUp" aria-label="글자 크게">A+</button>
+          <span class="tl" style="margin-left:6px">여백</span>
+          <select id="tMargin" aria-label="문서 여백"><option value="normal">보통 (11mm)</option><option value="narrow">좁게 (8mm)</option><option value="min">최소 (5.5mm)</option></select>
           <button type="button" class="btn sm" id="fitBtn">1쪽에 맞추기</button>
+        </div>
+        <div class="tool-group">
+          <span class="tl">DOCX 글꼴</span>
+          <select id="tDocFont" aria-label="DOCX 글꼴"><option value="malgun">맑은 고딕 (기본)</option><option value="pretendard">Pretendard (설치 시)</option><option value="nanum">나눔고딕 (설치 시)</option></select>
         </div>
         <div class="tool-group">
           <label class="check"><input type="checkbox" id="tTrans"> 해석</label>

@@ -8,7 +8,25 @@ import { parseLyrics, collapseRepeats, autoBlanks, renumber, segmentLine } from 
 import { findGrammarRanges, categoryOf } from "./data/grammar-catalog.js";
 import { buildGame, GAME_TYPES } from "./games.js";
 
+/** 문서 여백(mm): 위·아래 기준, 좌우는 +1.5mm */
+export const MARGINS = { normal: 11, narrow: 8, min: 5.5 };
+export const MARGIN_LABEL = { normal: "보통", narrow: "좁게", min: "최소" };
+/** DOCX 글꼴 후보(설치된 글꼴만 실제로 적용됨) */
+export const DOC_FONTS = {
+  malgun: { name: "맑은 고딕", docx: "Malgun Gothic", css: "'Malgun Gothic', '맑은 고딕'", note: "Windows·한글·Word 기본 글꼴" },
+  pretendard: { name: "Pretendard", docx: "Pretendard", css: "'Pretendard', 'Pretendard Variable'", note: "PC에 Pretendard가 설치된 경우" },
+  nanum: { name: "나눔고딕", docx: "NanumGothic", css: "'NanumGothic', '나눔고딕'", note: "PC에 나눔고딕이 설치된 경우" },
+  noto: { name: "Noto Sans KR", docx: "Noto Sans CJK KR", css: "'Noto Sans CJK KR', 'Noto Sans KR'", note: "Noto Sans KR(CJK)이 설치된 경우" },
+};
+export function pageStyle(ws, measureFont) {
+  const pad = MARGINS[ws.options.margin] || MARGINS.normal;
+  const f = measureFont ? `;font-family:${(DOC_FONTS[ws.options.docFont] || DOC_FONTS.malgun).css}, var(--font)` : "";
+  return `--ws-font:${ws.options.fontSize}pt;--ws-pad:${pad}mm${f}`;
+}
+
 export const DEFAULT_OPTIONS = {
+  margin: "normal",
+  docFont: "malgun",
   blankCount: 20,
   focus: "mixed",
   translation: true,
@@ -250,10 +268,10 @@ function infoHTML(ws, qrDataUrl) {
   return `<div class="ws-info">${qr}<div class="if-body">${rows}${focus}</div></div>`;
 }
 
-export function renderPage1(ws, { mode = "print", qr } = {}) {
+export function renderPage1(ws, { mode = "print", qr, measure = false } = {}) {
   const map = blanksMap(ws);
   const lines = ws.lines.map((l) => renderLineHTML(ws, l, mode, map)).join("");
-  return `<section class="ws-page p1" style="--ws-font:${ws.options.fontSize}pt">
+  return `<section class="ws-page p1" style="${pageStyle(ws, measure)}">
     ${headerHTML(ws)}
     ${infoHTML(ws, qr)}
     <div class="ws-lyrics">${lines}</div>
@@ -286,10 +304,10 @@ function gameHTML(ws, game, answer) {
   if (game.type === "wordsearch") {
     const ans = new Set(game.answerCells);
     const grid = game.grid.map((row, r) => `<tr>${row.map((ch, c) => `<td class="${answer && ans.has(r + "," + c) ? "on" : ""}">${ch}</td>`).join("")}</tr>`).join("");
-    const words = game.words.map((w) => `<span class="chip"><small>${w.num}</small> ${esc(w.display)}</span>`).join("");
+    const words = game.words.map((w) => `<li><span class="wn">${w.num}</span><b>${esc(w.display)}</b><span class="wm">${esc(w.meaning || "")}</span></li>`).join("");
     const skip = game.skipped && game.skipped.length ? `<div class="g-skip">※ 너무 길어 표에 넣지 못한 단어: ${game.skipped.map(esc).join(", ")}</div>` : "";
-    const cell = game.size > 13 ? 6.4 : 7.2;
-    return `<div class="g-ws"><table class="ws-grid" style="--cell:${cell}mm"><tbody>${grid}</tbody></table><div class="g-words"><b>찾을 단어 (${game.words.length})</b><div>${words}</div>${skip}</div></div>`;
+    const cell = game.size > 13 ? 6.2 : 7.4;
+    return `<div class="g-ws"><table class="ws-grid" style="--cell:${cell}mm"><tbody>${grid}</tbody></table><div class="g-words"><b>찾을 단어 (${game.words.length})</b><ul class="g-wlist">${words}</ul>${skip}</div></div>`;
   }
   if (game.type === "secret") {
     const key = "ABCDEFGHIJKLMNOPQRSTUVWXYZ".split("");
@@ -322,7 +340,7 @@ export function renderPage2(ws) {
   const game = gameData(ws);
   const gt = GAME_TYPES[ws.options.game];
   const guide = ws.options.vocabMode === "word" ? "단어의 뜻을 빈칸에 적어 보세요." : ws.options.vocabMode === "meaning" ? "뜻을 보고 알맞은 단어를 적어 보세요." : "빈칸에 알맞은 단어 또는 뜻을 적어 보세요.";
-  return `<section class="ws-page p2" style="--ws-font:${ws.options.fontSize}pt">
+  return `<section class="ws-page p2" style="${pageStyle(ws)}">
     <div class="ws-mini-head"><span>${esc(ws.song.title)} · ${esc(ws.song.artist)}</span><span>(&nbsp;&nbsp;&nbsp;&nbsp;)학년 (&nbsp;&nbsp;&nbsp;&nbsp;)반 이름 (&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;)</span></div>
     <h3 class="part">Part 1. Vocabulary Check</h3>
     <p class="guide">${guide} (번호는 가사 빈칸 번호와 같습니다.)</p>
@@ -338,7 +356,7 @@ export function renderAnswerPages(ws) {
   const game = gameData(ws);
   const map = blanksMap(ws);
   const lyricAns = `<table class="ws-ans"><tbody>${threeColumnRows(v).map((r) => `<tr>${r.map((it) => it ? `<td class="n">${it.num})</td><td>${esc(it.answer)}</td>` : '<td class="n"></td><td></td>').join("")}</tr>`).join("")}</tbody></table>`;
-  return `<section class="ws-page p3" style="--ws-font:${ws.options.fontSize}pt">
+  return `<section class="ws-page p3" style="${pageStyle(ws)}">
     <div class="ws-mini-head"><span>[Answer Key] ${esc(ws.song.title)} · ${esc(ws.song.artist)}</span><span>교사용</span></div>
     <h3 class="part">가사 빈칸 정답</h3>
     ${lyricAns}
@@ -347,7 +365,7 @@ export function renderAnswerPages(ws) {
     <h3 class="part">Part 2. ${esc(GAME_TYPES[ws.options.game].name)} 정답</h3>
     ${gameHTML(ws, game, true)}
   </section>
-  <section class="ws-page p4" style="--ws-font:${ws.options.fontSize}pt">
+  <section class="ws-page p4" style="${pageStyle(ws)}">
     <div class="ws-mini-head"><span>[Answer Key] 정답이 표시된 가사</span><span>교사용</span></div>
     <div class="ws-lyrics">${ws.lines.map((l) => renderLineHTML(ws, l, "answer", map)).join("")}</div>
   </section>`;

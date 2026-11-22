@@ -10,7 +10,7 @@ import { resolveVideos, mountPlayer, parseYouTubeId, watchUrl, searchUrl, thumbU
 import { parseLyrics, collapseRepeats } from "./lyrics.js";
 import {
   createWorksheet, computeLines, setBlanks, syncBlankIds, fillAutoBlanks, visibleBlanks, addBlank, removeBlank,
-  renderPage1, renderPage2, renderAnswerPages, renderAllPages, esc, grammarSummary,
+  renderPage1, renderPage2, renderAnswerPages, renderAllPages, esc, grammarSummary, MARGIN_LABEL,
 } from "./worksheet.js";
 import { renderOnline, bindOnline } from "./online.js";
 import { $, $$, showLoading, hideLoading, setLoadingStep, toast, qrDataUrl } from "./ui.js";
@@ -900,6 +900,8 @@ function initStep4() {
   opt("#tCollapse", "collapse", true);
   opt("#tVocab", "vocabMode", false);
   opt("#tGame", "game", false);
+  opt("#tMargin", "margin", false);
+  opt("#tDocFont", "docFont", false);
   $("#reshuffle").addEventListener("click", () => { app.ws.gameSeed = Math.floor(Math.random() * 1e9); changed(); toast("Part 2를 새로 섞었습니다.", "ok", 2000); });
   $("#printBtn").addEventListener("click", printWorksheet);
   $("#docxBtn").addEventListener("click", downloadDocx);
@@ -939,6 +941,8 @@ function renderStep4() {
   $("#tCollapse").checked = ws.options.collapse;
   $("#tVocab").value = ws.options.vocabMode;
   $("#tGame").value = ws.options.game;
+  $("#tMargin").value = ws.options.margin || "normal";
+  $("#tDocFont").value = ws.options.docFont || "malgun";
 
   const notes = (ws.warnings || []).map((w) => `<li>${esc(w)}</li>`).join("");
   const missingMeaning = visibleBlanks(ws).filter((b) => !b.meaning).length;
@@ -996,40 +1000,54 @@ function layoutPages() {
   });
 }
 
-function page1Height(fs) {
+function page1Height(fs, margin) {
   const ws = app.ws;
-  const prev = ws.options.fontSize;
+  const prev = { fs: ws.options.fontSize, m: ws.options.margin };
   ws.options.fontSize = fs;
+  if (margin) ws.options.margin = margin;
   const holder = document.createElement("div");
   holder.style.cssText = "position:absolute;left:-9999px;top:0;visibility:hidden";
-  holder.innerHTML = renderPage1(ws, { qr: app.qr });
+  // DOCX에 쓰일 글꼴로 재어 Word·한글에서도 1쪽에 들어가도록 함
+  holder.innerHTML = renderPage1(ws, { qr: app.qr, measure: true });
   document.body.appendChild(holder);
+  holder.firstElementChild.style.minHeight = "0"; // A4 최소 높이를 빼고 실제 내용 높이를 잼
   const h = holder.firstElementChild.offsetHeight;
   holder.remove();
-  ws.options.fontSize = prev;
+  ws.options.fontSize = prev.fs;
+  ws.options.margin = prev.m;
   return h;
 }
 
+/**
+ * 1쪽에 맞추기: ① 여백부터 줄이고(보통→좁게→최소) ② 그래도 넘치면 글자 크기를 줄입니다.
+ * DOCX와 같은 글꼴·줄 간격으로 재며, Word·한글의 차이를 고려해 3% 여유를 둡니다.
+ */
 function fitToPage(manual) {
   const ws = app.ws;
-  const start = manual ? 11 : ws.options.fontSize;
-  const min = manual ? 7.5 : 8.5;
-  if (!manual && page1Height(ws.options.fontSize) <= A4H + 2) return;
-  let chosen = null;
-  for (let fs = start; fs >= min; fs -= 0.5) {
-    if (page1Height(fs) <= A4H + 2) { chosen = fs; break; }
-  }
-  if (chosen != null) {
-    if (chosen !== ws.options.fontSize) { ws.options.fontSize = chosen; changed(); }
-    if (manual) toast(`1쪽에 맞게 글자를 ${chosen}pt로 조정했습니다.`, "ok");
-    else if (chosen < 10) toast(`가사가 1쪽에 들어가도록 글자를 ${chosen}pt로 줄였습니다.`, "info");
+  const LIMIT = A4H * 0.97;
+  const order = ["normal", "narrow", "min"];
+  const startM = Math.max(0, order.indexOf(ws.options.margin || "normal"));
+  const fs0 = ws.options.fontSize;
+  if (!manual && page1Height(fs0) <= LIMIT) return;
+  const minFs = manual ? 7.5 : 8.5;
+  const tries = [];
+  order.slice(startM).forEach((m) => tries.push({ fs: fs0, m }));
+  for (let fs = fs0 - 0.5; fs >= minFs; fs -= 0.5) tries.push({ fs, m: "min" });
+  const hit = tries.find((t) => page1Height(t.fs, t.m) <= LIMIT);
+  if (hit) {
+    const changed = hit.fs !== fs0 || hit.m !== ws.options.margin;
+    ws.options.fontSize = hit.fs;
+    ws.options.margin = hit.m;
+    if (changed) { app.dirty = { preview: true, online: true, edit: true }; renderStep4(); saveWorkDebounced(); }
+    const msg = `여백 ${MARGIN_LABEL[hit.m]}, 글자 ${hit.fs}pt로 1쪽에 맞췄습니다(DOCX에도 같게 적용).`;
+    if (manual || changed) toast(changed ? msg : "이미 1쪽에 들어갑니다.", changed ? "ok" : "info");
   } else {
     const tips = [];
     if (ws.options.translation) tips.push("해석 끄기");
     if (!ws.options.collapse) tips.push("후렴 접기");
-    tips.push("[Chorus] 같은 구간 표시 넣기");
-    if (manual) { ws.options.fontSize = min; changed(); }
-    toast(`가사가 길어 1쪽에 다 들어가지 않습니다. ${tips.join(", ")}를 시도해 보세요.`, "error", 8000);
+    tips.push("[Chorus] 구간 표시 넣기(AI 구간 표시 붙이기)");
+    if (manual) { ws.options.fontSize = minFs; ws.options.margin = "min"; app.dirty = { preview: true, online: true, edit: true }; renderStep4(); }
+    toast(`여백·글자를 최소로 줄여도 가사가 1쪽을 넘습니다. ${tips.join(", ")}를 시도해 보세요.`, "error", 8000);
   }
 }
 
@@ -1037,7 +1055,7 @@ function renderOnlineView() {
   const root = $("#view-online");
   root.innerHTML = renderOnline(app.ws);
   app.dirty.online = false;
-  bindOnline(root, app.ws, { onScale: () => saveWorkDebounced() });
+  bindOnline(root, app.ws, { mode: app.olMode, onScale: (scale, mode) => { if (mode) app.olMode = mode; else saveWorkDebounced(); } });
 }
 
 function renderEditView() {
