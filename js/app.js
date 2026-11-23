@@ -10,12 +10,17 @@ import { resolveVideos, mountPlayer, parseYouTubeId, watchUrl, searchUrl, thumbU
 import { parseLyrics, collapseRepeats } from "./lyrics.js";
 import {
   createWorksheet, computeLines, setBlanks, syncBlankIds, fillAutoBlanks, visibleBlanks, addBlank, removeBlank,
-  renderPage1, renderPage2, renderAnswerPages, renderAllPages, esc, grammarSummary, MARGIN_LABEL,
+  renderPage1, renderPage2, renderPage3, renderPage4, renderAnswerPages, renderAllPages, esc, grammarSummary, MARGIN_LABEL,
 } from "./worksheet.js";
 import { renderOnline, bindOnline } from "./online.js";
-import { $, $$, showLoading, hideLoading, setLoadingStep, toast, qrDataUrl } from "./ui.js";
+import { $, $$, showLoading, hideLoading, setLoadingStep, toast, qrDataUrl, openModal } from "./ui.js";
+import * as Cloud from "./cloud.js";
+import { openHelp, maybeWelcome } from "./help.js";
 
-const WORK_KEY = "popsong.work.v2";
+const WORK_KEY = "popsong.work.v2";      // (예전 형식: 작업 1개) → 새 형식으로 옮김
+const WORKS_KEY = "popsong.works.v1";    // 이 브라우저의 작업 목록 { id: { meta, data } }
+const CUR_KEY = "popsong.current.v1";    // 마지막으로 작업한 id
+const LOCAL_MAX = 30;
 const app = {
   step: 1,
   maxStep: 1,
@@ -31,6 +36,8 @@ const app = {
   cardCtrl: null,
   s3Ctrl: null,
   abort: null,
+  workId: null,
+  workKey: "",
 };
 
 /* =================== 초기화 =================== */
@@ -47,8 +54,14 @@ function init() {
   initStep3();
   initStep4();
   initVideoStage();
-  restoreWork();
+  initHelpAndWorks();
+  migrateOldWork();
+  const fresh = new URLSearchParams(location.search).has("new"); // [새 작업]으로 다시 연 경우
+  if (fresh) history.replaceState(null, "", location.pathname);
+  const resumed = fresh ? false : restoreWork();
   checkServer();
+  initAccount(resumed || fresh);
+  maybeWelcome();
   window.addEventListener("resize", debounce(() => { if (app.step === 4) layoutPages(); }, 150));
 }
 
@@ -584,6 +597,18 @@ async function pickSong(c) {
   if (!c) return;
   if (!app.grammar) { toast("표현을 먼저 골라 주세요.", "error"); goStep(1); return; }
   if (!c.videos && !c.manualId) { c.videos = await resolveVideos(c, API.state.ytKey).catch(() => null); }
+  const key = workKeyOf(c, app.grammar);
+  if (!app.workId || key !== app.workKey) {
+    // 다른 곡(또는 다른 표현) → 새 작업. 이전 곡의 활동지는 그 작업에 그대로 남겨 둠
+    if (app.workId && app.selected) saveWork();
+    app.workId = newWorkId();
+    app.workKey = key;
+    if (app.ws) {
+      app.ws = null;
+      app.maxStep = Math.min(app.maxStep, 3);
+      app.dirty = { preview: true, online: true, edit: true };
+    }
+  }
   app.selected = { song: { title: c.title, artist: c.artist, year: c.year }, card: c };
   if (app.cardCtrl) { app.cardCtrl.destroy(); app.cardCtrl = null; }
   $("#s3Sub").textContent = `${c.title} — ${c.artist} · ${grammarSummaryOf(app.grammar)}`;
@@ -637,7 +662,7 @@ function renderS3Bar(cur, warn) {
 }
 
 function initStep3() {
-  $("#lyrics").addEventListener("input", debounce(() => { updateLyricStat(); saveWork(); }, 250));
+  $("#lyrics").addEventListener("input", debounce(() => { updateLyricStat(); saveWorkDebounced(); }, 250));
   $("#oCollapse").addEventListener("change", updateLyricStat);
   $("#s3UrlBtn").addEventListener("click", () => {
     const id = parseYouTubeId($("#s3Url").value);
@@ -965,11 +990,45 @@ const PX_PER_MM = (() => { const d = document.createElement("div"); d.style.cssT
 const A4H = 297 * PX_PER_MM;
 const A4W = 210 * PX_PER_MM;
 
+/** 내용 높이(mm 기준 px)를 재기: A4 최소 높이 제외, DOCX 글꼴로 */
+function measureHtml(html) {
+  const holder = document.createElement("div");
+  holder.style.cssText = "position:absolute;left:-9999px;top:0;visibility:hidden";
+  holder.innerHTML = html;
+  document.body.appendChild(holder);
+  const el = holder.firstElementChild;
+  el.style.minHeight = "0";
+  const h = el.offsetHeight;
+  holder.remove();
+  return h;
+}
+
+/** 2·3·4쪽을 각각 1쪽 안에 맞춥니다(10pt에서 시작해 0.5pt씩, 최소 7pt). 넘치는 쪽 목록을 돌려줌 */
+function fitOtherPages() {
+  const ws = app.ws;
+  const LIMIT = A4H * 0.97;
+  ws.options.pageFont = ws.options.pageFont || {};
+  const R = { p2: renderPage2, p3: renderPage3, p4: renderPage4 };
+  const over = [];
+  Object.keys(R).forEach((key) => {
+    const top = key === "p4" ? Math.min(10, ws.options.fontSize + 0.5) : 10;
+    let chosen = null;
+    for (let fs = top; fs >= 7; fs -= 0.5) {
+      ws.options.pageFont[key] = fs;
+      if (measureHtml(R[key](ws, { measure: true })) <= LIMIT) { chosen = fs; break; }
+    }
+    if (chosen == null) { ws.options.pageFont[key] = 7; over.push(key); }
+  });
+  return over;
+}
+
 function renderPreview() {
   const ws = app.ws;
-  const labels = ["1쪽 · 가사와 빈칸 (학생용)", "2쪽 · Part 1·2 단어 활동 (학생용)", "3쪽 · 정답 (교사용)", "4쪽 · 정답 표시 가사 (교사용)"];
+  app.pagesOver = fitOtherPages();
+  const pf = ws.options.pageFont || {};
+  const labels = [`1쪽 · 가사와 빈칸 (학생용) · ${ws.options.fontSize}pt`, `2쪽 · Part 1·2 단어 활동 (학생용) · ${pf.p2}pt`, `3쪽 · 정답 (교사용) · ${pf.p3}pt`, `4쪽 · 정답 표시 가사 (교사용) · ${pf.p4}pt`];
   const tmp = document.createElement("div");
-  tmp.innerHTML = renderPage1(ws, { qr: app.qr }) + renderPage2(ws) + renderAnswerPages(ws);
+  tmp.innerHTML = renderPage1(ws, { qr: app.qr }) + renderPage2(ws) + renderPage3(ws) + renderPage4(ws);
   const pages = Array.from(tmp.children);
   $("#pages").innerHTML = pages.map((p, i) => `<div class="page-label" data-pl="${i}">${labels[i] || i + 1 + "쪽"} <span class="pl-warn"></span></div><div class="page-scale-wrap"><div class="page-scale">${p.outerHTML}</div></div>`).join("");
   app.dirty.preview = false;
@@ -1174,6 +1233,7 @@ async function aiFillMeanings() {
 }
 
 function printWorksheet() {
+  fitOtherPages();
   const root = $("#printRoot");
   root.innerHTML = renderAllPages(app.ws, app.qr);
   document.body.classList.add("printing");
@@ -1189,6 +1249,7 @@ async function downloadDocx() {
   const label = btn.textContent;
   btn.textContent = "만드는 중…";
   try {
+    fitOtherPages();
     const { exportDocx } = await import("./export-docx.js");
     const name = await exportDocx(app.ws, app.qr);
     toast(`‘${name}’ 파일을 내려받았습니다. 한글(HWP)·Word·Google 문서에서 열 수 있습니다.`, "ok", 6000);
@@ -1201,62 +1262,419 @@ async function downloadDocx() {
   }
 }
 
-/* =================== 작업 저장 =================== */
+/* =================== 작업 저장 (이 브라우저 + 구글 계정) =================== */
 
+const newWorkId = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 7);
+const workKeyOf = (song, g) => [song.title, song.artist, g ? g.id || g.label : ""].join("|").toLowerCase();
+
+function localWorks() {
+  try { return JSON.parse(localStorage.getItem(WORKS_KEY) || "{}") || {}; } catch (e) { return {}; }
+}
+function writeLocalWorks(all) {
+  const ids = Object.keys(all).sort((x, y) => (all[y].meta.savedAt || 0) - (all[x].meta.savedAt || 0));
+  for (let keep = LOCAL_MAX; keep >= 3; keep = Math.floor(keep / 2)) {
+    const slim = {};
+    ids.slice(0, keep).forEach((id) => { slim[id] = all[id]; });
+    try { localStorage.setItem(WORKS_KEY, JSON.stringify(slim)); return true; } catch (e) { /* 공간 부족 → 오래된 것부터 줄임 */ }
+  }
+  return false;
+}
+function removeLocalWork(id) {
+  const all = localWorks();
+  delete all[id];
+  writeLocalWorks(all);
+}
+
+function snapshotWork() {
+  return {
+    grammar: app.grammar, grade: app.grade,
+    selected: app.selected ? { song: app.selected.song, videoId: app.selected.videoId, card: { ...app.selected.card } } : null,
+    lyrics: $("#lyrics").value,
+    ws: app.ws ? { ...app.ws, lines: undefined } : null,
+    maxStep: app.maxStep,
+    savedAt: Date.now(),
+  };
+}
+function workMeta(data) {
+  const song = data.ws ? data.ws.song : data.selected ? data.selected.song : { title: "", artist: "" };
+  return {
+    title: song.title || "", artist: song.artist || "",
+    grammarLabel: data.grammar ? data.grammar.label : "", grammarId: data.grammar ? data.grammar.id || "" : "",
+    step: data.ws ? 4 : 3,
+    blanks: data.ws ? (data.ws.blanks || []).length : 0,
+    game: data.ws ? data.ws.options.game : "",
+    savedAt: data.savedAt,
+  };
+}
+
+/** 곡을 고른 뒤부터 자동 저장: 이 브라우저에 바로, 로그인했으면 계정에도(잠시 뒤 한꺼번에) */
 function saveWork() {
-  try {
-    const data = {
-      grammar: app.grammar, grade: app.grade,
-      selected: app.selected ? { song: app.selected.song, videoId: app.selected.videoId, card: { ...app.selected.card } } : null,
-      lyrics: $("#lyrics").value,
-      ws: app.ws ? { ...app.ws, lines: undefined } : null,
-      maxStep: app.maxStep,
-      savedAt: Date.now(),
-    };
-    localStorage.setItem(WORK_KEY, JSON.stringify(data));
-  } catch (e) { /* 저장 공간 부족 등은 무시 */ }
+  if (!app.selected || !app.grammar) return;
+  if (!app.workId) app.workId = newWorkId();
+  const data = snapshotWork();
+  const meta = workMeta(data);
+  const all = localWorks();
+  all[app.workId] = { meta, data };
+  writeLocalWorks(all);
+  try { localStorage.setItem(CUR_KEY, app.workId); } catch (e) { /* */ }
   if (app.ws) cacheFromWs(app.ws);
+  if (Cloud.cloud.signedIn) scheduleCloudSave();
 }
 const saveWorkDebounced = debounce(saveWork, 600);
 
-function restoreWork() {
-  let data = null;
-  try { data = JSON.parse(localStorage.getItem(WORK_KEY) || "null"); } catch (e) { data = null; }
-  if (!data || !data.grammar) return;
-  const box = document.createElement("div");
-  const title = data.ws ? data.ws.song.title : data.selected ? data.selected.song.title : data.grammar.label;
-  box.className = "notice info";
-  box.innerHTML = `최근 작업이 있습니다: <b>${esc(title)}</b> (${esc(data.grammar.label)}) <button type="button" class="btn sm" id="resume">이어서 하기</button> <button type="button" class="btn sm ghost" id="discard">지우기</button>`;
-  $("#step1 .card").prepend(box);
-  $("#resume").onclick = () => {
-    box.remove();
-    selectGrammar(data.grammar.custom ? data.grammar : (getGrammar(data.grammar.id) || data.grammar));
-    app.grade = data.grade || ""; $("#grade").value = app.grade;
-    if (data.selected) {
-      app.selected = data.selected;
-      app.cards = [data.selected.card];
-      $("#lyrics").value = data.lyrics || "";
-      $("#lyrics").dataset.song = data.selected.song.title;
-      $("#s3Sub").textContent = `${data.selected.song.title} — ${data.selected.song.artist} · ${grammarSummaryOf(app.grammar)}`;
-      $("#lyrLinks").innerHTML = lyricLinksHTML(data.selected.song.title, data.selected.song.artist);
-      updateLyricStat();
-      unlock(3);
+let cloudTimer = null;
+let cloudBusy = false;
+const cloudPending = new Set(); // 계정에 올릴 작업 id(작업을 바꿔도 이전 작업 저장이 빠지지 않게)
+function scheduleCloudSave(delay = 1800) {
+  if (app.workId) cloudPending.add(app.workId);
+  setSync("pending");
+  clearTimeout(cloudTimer);
+  cloudTimer = setTimeout(cloudSaveNow, delay);
+}
+async function cloudSaveNow() {
+  clearTimeout(cloudTimer);
+  if (!Cloud.cloud.signedIn || !cloudPending.size) return;
+  if (cloudBusy) { cloudTimer = setTimeout(cloudSaveNow, 800); return; }
+  cloudBusy = true;
+  setSync("saving");
+  const local = localWorks();
+  try {
+    for (const id of Array.from(cloudPending)) {
+      const item = local[id];
+      if (item) await Cloud.saveWork(id, item.meta, item.data);
+      cloudPending.delete(id);
     }
-    if (data.ws) {
-      app.ws = data.ws;
-      app.ws.lines = computeLines(app.ws);
-      syncBlankIds(app.ws);
-      app.qr = app.ws.song.videoId ? qrDataUrl(watchUrl(app.ws.song.videoId)) : "";
-      app.dirty = { preview: true, online: true, edit: true };
-      unlock(4);
-      unlock(2);
-      renderCards();
-      goStep(4);
-    } else if (data.selected) {
-      unlock(2); renderCards(); goStep(3);
+    setSync("saved");
+  } catch (e) {
+    console.error(e);
+    setSync("error", Cloud.authError(e));
+  } finally {
+    cloudBusy = false;
+  }
+}
+window.addEventListener("beforeunload", (e) => {
+  if (Cloud.cloud.signedIn && cloudPending.size) { cloudSaveNow(); e.preventDefault(); e.returnValue = ""; }
+});
+
+function setSync(state, msg = "") {
+  const el = $("#syncState");
+  if (!Cloud.cloud.signedIn) { el.hidden = true; return; }
+  el.hidden = false;
+  el.dataset.s = state;
+  const t = new Date().toLocaleTimeString("ko-KR", { hour: "2-digit", minute: "2-digit" });
+  el.textContent = state === "saving" || state === "pending" ? "저장 중…" : state === "saved" ? `계정에 저장됨 ${t}` : state === "error" ? "저장 실패" : "";
+  el.title = state === "error" ? msg : state === "saved" ? "구글 계정에 저장되어 다른 기기에서도 이어서 할 수 있습니다." : "";
+  if (state === "error" && msg) toast("계정 저장 실패: " + msg, "error", 7000);
+}
+
+/** 예전(작업 1개) 저장 형식을 새 목록으로 옮김 */
+function migrateOldWork() {
+  let old = null;
+  try { old = JSON.parse(localStorage.getItem(WORK_KEY) || "null"); } catch (e) { old = null; }
+  if (!old) return;
+  if (old.grammar && old.selected) {
+    const id = newWorkId();
+    const all = localWorks();
+    all[id] = { meta: workMeta(old), data: old };
+    writeLocalWorks(all);
+    try { localStorage.setItem(CUR_KEY, id); } catch (e) { /* */ }
+  }
+  try { localStorage.removeItem(WORK_KEY); } catch (e) { /* */ }
+}
+
+/** 저장된 작업 데이터를 화면에 펼침(이 브라우저 · 계정 공통) */
+function applyWork(data, id) {
+  if (!data || !data.grammar) { toast("작업 내용을 읽지 못했습니다.", "error"); return false; }
+  if (app.cardCtrl) { app.cardCtrl.destroy(); app.cardCtrl = null; }
+  if (app.s3Ctrl) { app.s3Ctrl.destroy(); app.s3Ctrl = null; }
+  $$("#step1 .notice.resume").forEach((n) => n.remove());
+  app.workId = id || newWorkId();
+  app.ws = null;
+  app.selected = null;
+  app.maxStep = 1;
+  selectGrammar(data.grammar.custom ? data.grammar : (getGrammar(data.grammar.id) || data.grammar));
+  app.grade = data.grade || ""; $("#grade").value = app.grade;
+  if (data.selected) {
+    app.selected = data.selected;
+    app.workKey = workKeyOf(data.selected.song, app.grammar);
+    app.cards = [data.selected.card];
+    $("#lyrics").value = data.lyrics || "";
+    $("#lyrics").dataset.song = data.selected.song.title;
+    $("#s3Sub").textContent = `${data.selected.song.title} — ${data.selected.song.artist} · ${grammarSummaryOf(app.grammar)}`;
+    $("#lyrLinks").innerHTML = lyricLinksHTML(data.selected.song.title, data.selected.song.artist);
+    updateLyricStat();
+    renderCacheNote();
+    unlock(2);
+    unlock(3);
+  }
+  try { localStorage.setItem(CUR_KEY, app.workId); } catch (e) { /* */ }
+  if (data.ws) {
+    app.ws = data.ws;
+    app.ws.lines = computeLines(app.ws);
+    syncBlankIds(app.ws);
+    app.qr = app.ws.song.videoId ? qrDataUrl(watchUrl(app.ws.song.videoId)) : "";
+    app.dirty = { preview: true, online: true, edit: true };
+    unlock(4);
+    renderCards();
+    app.step = 0;
+    goStep(4);
+  } else if (data.selected) {
+    renderCards();
+    app.step = 0;
+    goStep(3);
+  } else {
+    goStep(1);
+  }
+  return true;
+}
+
+/** 이 브라우저의 마지막 작업 이어서 하기 알림. 알림을 띄웠으면 true */
+function restoreWork() {
+  let id = "";
+  try { id = localStorage.getItem(CUR_KEY) || ""; } catch (e) { id = ""; }
+  const item = id && localWorks()[id];
+  if (!item) return false;
+  showResumeNotice(item.meta, () => applyWork(item.data, id), () => {
+    try { localStorage.removeItem(CUR_KEY); } catch (e) { /* */ }
+  }, "최근 작업");
+  return true;
+}
+
+function showResumeNotice(meta, onResume, onDismiss, label) {
+  $$("#step1 .notice.resume").forEach((n) => n.remove());
+  const box = document.createElement("div");
+  box.className = "notice info resume";
+  box.innerHTML = `${esc(label)}: <b>${esc(meta.title || "제목 없음")}</b>${meta.artist ? " — " + esc(meta.artist) : ""} <span class="muted">(${esc(meta.grammarLabel || "")}${meta.savedAt ? " · " + esc(timeAgo(meta.savedAt)) : ""})</span>
+    <span class="nb"><button type="button" class="btn sm" data-r>이어서 하기</button> <button type="button" class="btn sm ghost" data-l>내 작업 모두 보기</button> <button type="button" class="btn sm ghost" data-x aria-label="알림 닫기">닫기</button></span>`;
+  $("#step1 .card").prepend(box);
+  box.querySelector("[data-r]").onclick = () => { box.remove(); onResume(); };
+  box.querySelector("[data-l]").onclick = () => openWorks();
+  box.querySelector("[data-x]").onclick = () => { box.remove(); if (onDismiss) onDismiss(); };
+}
+
+function timeAgo(ms) {
+  const d = (Date.now() - ms) / 1000;
+  if (d < 60) return "방금 전";
+  if (d < 3600) return Math.floor(d / 60) + "분 전";
+  if (d < 86400) return Math.floor(d / 3600) + "시간 전";
+  if (d < 86400 * 7) return Math.floor(d / 86400) + "일 전";
+  return new Date(ms).toLocaleDateString("ko-KR");
+}
+
+/* ---------- 계정(구글 로그인) ---------- */
+
+function initAccount(resumedLocally) {
+  let announced = false;
+  Cloud.cloud.onChange((c) => {
+    renderAuthBox();
+    if (!c.signedIn) { setSync("off"); return; }
+    if (app.workId && app.selected) scheduleCloudSave(300);
+    else setSync("idle");
+    // 다른 기기에서 처음 열었을 때: 계정의 최근 작업을 이어서 할 수 있게 안내
+    if (!announced && !resumedLocally && app.step === 1 && !app.selected) {
+      announced = true;
+      Cloud.listWorks().then((list) => {
+        if (!list.length || app.selected || app.step !== 1) return;
+        const w = list[0];
+        showResumeNotice({ ...w, savedAt: w.updatedAt }, () => openCloudWork(w.id), null, "계정에 저장된 최근 작업");
+      }).catch(() => {});
+    }
+  });
+  Cloud.initCloud();
+}
+
+function renderAuthBox() {
+  const box = $("#authBox");
+  const c = Cloud.cloud;
+  if (c.state === "loading") { box.innerHTML = ""; return; }
+  if (!c.signedIn) {
+    box.innerHTML = `<button type="button" class="hdr-btn login-btn" id="loginBtn" title="구글 계정으로 로그인하면 다른 기기에서도 작업을 이어서 할 수 있습니다">
+      <svg viewBox="0 0 48 48" width="17" height="17" aria-hidden="true"><path fill="#FFC107" d="M43.6 20.5H42V20H24v8h11.3C33.7 32.7 29.2 36 24 36c-6.6 0-12-5.4-12-12s5.4-12 12-12c3.1 0 5.8 1.2 7.9 3.1l5.7-5.7C34 6.1 29.3 4 24 4 12.9 4 4 12.9 4 24s8.9 20 20 20 20-8.9 20-20c0-1.3-.1-2.4-.4-3.5z"/><path fill="#FF3D00" d="m6.3 14.7 6.6 4.8C14.7 15.1 19 12 24 12c3.1 0 5.8 1.2 7.9 3.1l5.7-5.7C34 6.1 29.3 4 24 4 16.3 4 9.7 8.3 6.3 14.7z"/><path fill="#4CAF50" d="M24 44c5.2 0 9.9-2 13.4-5.2l-6.2-5.2C29.2 35.1 26.7 36 24 36c-5.2 0-9.6-3.3-11.3-7.9l-6.5 5C9.5 39.6 16.2 44 24 44z"/><path fill="#1976D2" d="M43.6 20.5H42V20H24v8h11.3c-.8 2.2-2.2 4.2-4.1 5.6l6.2 5.2C37 39.2 44 34 44 24c0-1.3-.1-2.4-.4-3.5z"/></svg>
+      <span class="hb-t">로그인</span></button>`;
+    $("#loginBtn").onclick = doSignIn;
+    return;
+  }
+  const u = c.user;
+  const initial = esc((u.name || "?").trim().charAt(0).toUpperCase());
+  box.innerHTML = `<button type="button" class="avatar-btn" id="avatarBtn" aria-haspopup="menu" aria-expanded="false" title="${esc(u.name)} (${esc(u.email)})">
+      ${u.photo ? `<img src="${esc(u.photo)}" alt="" referrerpolicy="no-referrer">` : `<span class="av-i">${initial}</span>`}
+    </button>
+    <div class="acct-menu" id="acctMenu" role="menu" hidden>
+      <div class="am-user"><b>${esc(u.name)}</b><small>${esc(u.email)}</small></div>
+      <button type="button" role="menuitem" data-a="works">내 작업 목록</button>
+      <button type="button" role="menuitem" data-a="new">+ 새 작업 시작</button>
+      <button type="button" role="menuitem" data-a="out">로그아웃</button>
+    </div>`;
+  const btn = $("#avatarBtn"), menu = $("#acctMenu");
+  const close = () => { menu.hidden = true; btn.setAttribute("aria-expanded", "false"); };
+  btn.onclick = (e) => { e.stopPropagation(); menu.hidden = !menu.hidden; btn.setAttribute("aria-expanded", String(!menu.hidden)); };
+  menu.onclick = async (e) => {
+    const a = e.target.closest("[data-a]");
+    if (!a) return;
+    close();
+    if (a.dataset.a === "works") openWorks();
+    if (a.dataset.a === "new") startNewWork();
+    if (a.dataset.a === "out") {
+      await cloudSaveNow().catch(() => {});
+      await Cloud.signOut();
+      toast("로그아웃했습니다. 이 브라우저의 작업은 그대로 남아 있습니다.");
     }
   };
-  $("#discard").onclick = () => { try { localStorage.removeItem(WORK_KEY); } catch (e) { /* */ } box.remove(); };
+  document.addEventListener("click", (e) => { if (!menu.hidden && !e.target.closest("#authBox")) close(); });
+}
+
+async function doSignIn() {
+  const c = Cloud.cloud;
+  if (c.state === "off" || c.state === "error") {
+    openModal({
+      title: "구글 로그인 준비가 필요합니다",
+      html: `<p>${c.state === "error" ? esc(c.message) : "이 사이트에 아직 로그인 기능(Firebase)이 연결되지 않았습니다."}</p>
+        ${c.state === "off" ? `<p class="muted small">사이트를 배포한 분이 README의 <b>‘구글 로그인 설정(Firebase)’</b>을 따라 Vercel 환경 변수 <code>FIREBASE_CONFIG</code>를 넣으면 켜집니다.${c.message ? "<br>" + esc(c.message) : ""}</p>` : ""}
+        <p class="muted small">지금도 작업은 <b>이 브라우저에</b> 자동 저장됩니다.</p>
+        <div class="modal-actions"><button type="button" class="btn primary" data-close>확인</button></div>`,
+    });
+    return;
+  }
+  try {
+    await Cloud.signIn();
+  } catch (e) {
+    const m = Cloud.authError(e);
+    if (m) toast("로그인 실패: " + m, "error", 8000);
+  }
+}
+
+async function openCloudWork(id) {
+  showLoading({ title: "작업을 불러오는 중", kind: "connect", steps: [] });
+  try {
+    const data = await Cloud.loadWork(id);
+    hideLoading();
+    if (!data) { toast("작업을 찾지 못했습니다(삭제되었을 수 있음).", "error"); return; }
+    const all = localWorks();
+    all[id] = { meta: workMeta(data), data };
+    writeLocalWorks(all);
+    applyWork(data, id);
+    toast("작업을 불러왔습니다.");
+  } catch (e) {
+    hideLoading();
+    toast("불러오기 실패: " + Cloud.authError(e), "error", 7000);
+  }
+}
+
+function startNewWork() {
+  try { localStorage.removeItem(CUR_KEY); } catch (e) { /* */ }
+  const go = () => { cloudPending.clear(); location.href = location.pathname + "?new=1"; };
+  if (Cloud.cloud.signedIn && cloudPending.size) cloudSaveNow().finally(go); else go();
+}
+
+/* ---------- 내 작업 목록 ---------- */
+
+async function openWorks() {
+  const signed = Cloud.cloud.signedIn;
+  const d = openModal({
+    title: "내 작업",
+    wide: true,
+    cls: "works-modal",
+    html: `<div class="wk-top">
+        <input type="search" class="wk-q" placeholder="곡 제목 · 가수 · 표현으로 찾기" aria-label="작업 검색">
+        <button type="button" class="btn primary sm" data-new>+ 새 작업</button>
+      </div>
+      ${signed ? "" : `<div class="notice info wk-login">지금은 <b>이 브라우저에만</b> 저장됩니다. 구글 로그인하면 다른 컴퓨터·태블릿에서도 이어서 할 수 있어요. <button type="button" class="btn sm" data-login>구글 로그인</button></div>`}
+      <div class="wk-body"><p class="muted">불러오는 중…</p></div>`,
+  });
+  d.querySelector("[data-new]").onclick = () => { d.close(); startNewWork(); };
+  const lb = d.querySelector("[data-login]");
+  if (lb) lb.onclick = () => { d.close(); doSignIn(); };
+
+  let cloudList = [];
+  let cloudErr = "";
+  if (signed) {
+    try { cloudList = await Cloud.listWorks(); } catch (e) { cloudErr = Cloud.authError(e); }
+  }
+  const render = () => {
+    const q = d.querySelector(".wk-q").value.trim().toLowerCase();
+    const match = (m) => !q || [m.title, m.artist, m.grammarLabel].join(" ").toLowerCase().includes(q);
+    const local = localWorks();
+    const cloudIds = new Set(cloudList.map((w) => w.id));
+    const localOnly = Object.entries(local).filter(([id]) => !cloudIds.has(id))
+      .map(([id, v]) => ({ id, ...v.meta, updatedAt: v.meta.savedAt })).sort((a, b) => b.updatedAt - a.updatedAt);
+    const row = (w, where) => `<li class="wk-item${w.id === app.workId ? " cur" : ""}" data-id="${esc(w.id)}" data-where="${where}">
+        <div class="wk-main">
+          <b class="wk-t">${esc(w.title || "제목 없음")}</b><span class="wk-a">${esc(w.artist || "")}</span>
+          <div class="wk-sub"><span class="wk-g">${esc(w.grammarLabel || "")}</span><span class="wk-st">${w.step === 4 ? `활동지 완성${w.blanks ? ` · 빈칸 ${w.blanks}` : ""}` : "가사 작업 중"}</span><span class="wk-time">${w.updatedAt ? esc(timeAgo(w.updatedAt)) : ""}</span>${w.id === app.workId ? '<span class="wk-cur">지금 작업 중</span>' : ""}</div>
+        </div>
+        <div class="wk-act">
+          <button type="button" class="btn sm" data-open>열기</button>
+          ${where === "local" && signed ? '<button type="button" class="btn sm ghost" data-up>계정에 올리기</button>' : ""}
+          <button type="button" class="btn sm ghost danger" data-del aria-label="${esc(w.title)} 삭제">삭제</button>
+        </div>
+      </li>`;
+    const cl = cloudList.filter(match), ll = localOnly.filter(match);
+    let html = "";
+    if (signed) {
+      html += `<h3 class="wk-h">구글 계정에 저장된 작업 <span class="muted">${cloudList.length}개 · 어느 기기에서든 열 수 있음</span></h3>`;
+      html += cloudErr ? `<div class="notice error">${esc(cloudErr)}</div>` : cl.length ? `<ul class="wk-list">${cl.map((w) => row(w, "cloud")).join("")}</ul>` : `<p class="muted wk-empty">${q ? "검색 결과가 없습니다." : "아직 계정에 저장된 작업이 없습니다. 곡을 고르면 자동으로 저장됩니다."}</p>`;
+      if (localOnly.length) {
+        html += `<h3 class="wk-h">이 브라우저에만 있는 작업 <span class="muted">${localOnly.length}개</span> <button type="button" class="btn sm" data-upall>모두 계정에 올리기</button></h3>`;
+        html += ll.length ? `<ul class="wk-list">${ll.map((w) => row(w, "local")).join("")}</ul>` : `<p class="muted wk-empty">검색 결과가 없습니다.</p>`;
+      }
+    } else {
+      html += `<h3 class="wk-h">이 브라우저에 저장된 작업 <span class="muted">${localOnly.length}개</span></h3>`;
+      html += ll.length ? `<ul class="wk-list">${ll.map((w) => row(w, "local")).join("")}</ul>` : `<p class="muted wk-empty">${q ? "검색 결과가 없습니다." : "아직 저장된 작업이 없습니다. 2단계에서 곡을 고르면 자동으로 저장됩니다."}</p>`;
+    }
+    d.querySelector(".wk-body").innerHTML = html;
+  };
+  render();
+  d.querySelector(".wk-q").addEventListener("input", render);
+
+  const upload = async (id) => {
+    const it = localWorks()[id];
+    if (!it) return;
+    await Cloud.saveWork(id, it.meta, it.data);
+    cloudList = cloudList.filter((w) => w.id !== id);
+    cloudList.unshift({ id, ...it.meta, updatedAt: Date.now() });
+  };
+  d.querySelector(".wk-body").addEventListener("click", async (e) => {
+    if (e.target.closest("[data-upall]")) {
+      const b = e.target.closest("[data-upall]");
+      b.disabled = true; b.textContent = "올리는 중…";
+      const ids = Object.keys(localWorks()).filter((id) => !cloudList.some((w) => w.id === id));
+      let n = 0;
+      for (const id of ids) { try { await upload(id); n++; } catch (err) { toast("올리기 실패: " + Cloud.authError(err), "error", 7000); break; } }
+      if (n) toast(`${n}개 작업을 계정에 올렸습니다.`);
+      render();
+      return;
+    }
+    const li = e.target.closest(".wk-item");
+    if (!li) return;
+    const id = li.dataset.id, where = li.dataset.where;
+    if (e.target.closest("[data-open]")) {
+      d.close();
+      if (where === "cloud") openCloudWork(id);
+      else { const it = localWorks()[id]; if (it) applyWork(it.data, id); }
+    } else if (e.target.closest("[data-up]")) {
+      try { await upload(id); toast("계정에 올렸습니다."); render(); } catch (err) { toast("올리기 실패: " + Cloud.authError(err), "error", 7000); }
+    } else if (e.target.closest("[data-del]")) {
+      const title = li.querySelector(".wk-t").textContent;
+      if (!confirm(`‘${title}’ 작업을 삭제할까요?${where === "cloud" ? "\n(구글 계정과 이 브라우저에서 모두 삭제됩니다)" : ""}`)) return;
+      try {
+        if (where === "cloud") { await Cloud.deleteWork(id); cloudList = cloudList.filter((w) => w.id !== id); }
+        removeLocalWork(id);
+        if (id === app.workId) { app.workId = null; try { localStorage.removeItem(CUR_KEY); } catch (err) { /* */ } }
+        render();
+      } catch (err) { toast("삭제 실패: " + Cloud.authError(err), "error", 7000); }
+    }
+  });
+}
+
+/* ---------- 도움말 ---------- */
+
+function initHelpAndWorks() {
+  $("#helpBtn").addEventListener("click", () => openHelp(app.step >= 1 && app.step <= 4 ? "s" + app.step : "start"));
+  $("#worksBtn").addEventListener("click", openWorks);
+  document.addEventListener("click", (e) => {
+    const q = e.target.closest("[data-help]");
+    if (q) { e.preventDefault(); e.stopPropagation(); openHelp(q.dataset.help); }
+  }, true);
 }
 
 /* =================== 4단계 수업 영상 =================== */

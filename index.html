@@ -29,11 +29,23 @@
           <small>2022 개정 교육과정 언어 형식 · 영상 · 활동지 · 정답 확인</small>
         </span>
       </a>
-      <button type="button" id="apiPill" class="api-pill st-none" aria-controls="settingsPanel" aria-expanded="false">
-        <span class="dot" aria-hidden="true"></span>
-        <span class="pill-label">키 미설정</span>
-        <span class="pill-sub">AI 설정</span>
-      </button>
+      <div class="hdr-actions">
+        <span id="syncState" class="sync-state" role="status" aria-live="polite" hidden></span>
+        <button type="button" id="worksBtn" class="hdr-btn" title="작업 중이거나 이전에 만든 활동지 목록">
+          <svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true"><path fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round" d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/></svg>
+          <span class="hb-t">내 작업</span>
+        </button>
+        <button type="button" id="helpBtn" class="hdr-btn" title="사이트 이용 방법">
+          <svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true"><circle cx="12" cy="12" r="9.5" fill="none" stroke="currentColor" stroke-width="2"/><path fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" d="M9.5 9.3a2.6 2.6 0 0 1 5 .9c0 1.8-2.5 2.2-2.5 3.8"/><circle cx="12" cy="17.2" r="1.2" fill="currentColor"/></svg>
+          <span class="hb-t">도움말</span>
+        </button>
+        <div id="authBox" class="auth-box"></div>
+        <button type="button" id="apiPill" class="api-pill st-none" aria-controls="settingsPanel" aria-expanded="false">
+          <span class="dot" aria-hidden="true"></span>
+          <span class="pill-label">키 미설정</span>
+          <span class="pill-sub">AI 설정</span>
+        </button>
+      </div>
     </div>
   </header>
 
@@ -50,7 +62,7 @@
     <!-- AI 연결 설정 -->
     <section id="settingsPanel" class="card settings" hidden aria-labelledby="setTitle">
       <div class="card-h set-head">
-        <h2 id="setTitle">AI 연결 설정 <span class="opt">선택 사항</span></h2>
+        <h2 id="setTitle">AI 연결 설정 <span class="opt">선택 사항</span><button type="button" class="q-btn" data-help="ai" aria-label="AI 설정 도움말" title="AI 설정 도움말">?</button></h2>
         <div class="set-sum">
           <span class="api-mini st-none" id="apiMini"><span class="dot"></span><b>키 미설정</b></span>
           <button type="button" class="btn sm ghost" id="settingsToggle" aria-expanded="true" aria-controls="settingsBody">접기</button>
@@ -107,7 +119,7 @@
     <!-- 1단계 -->
     <section class="step" id="step1" aria-labelledby="s1Title">
       <div class="card">
-        <div class="card-h"><h2 id="s1Title"><span class="sn">1</span>가르칠 표현 선택</h2></div>
+        <div class="card-h"><h2 id="s1Title"><span class="sn">1</span>가르칠 표현 선택<button type="button" class="q-btn" data-help="s1" aria-label="1단계 도움말" title="이 단계 도움말">?</button></h2></div>
         <div class="pick-row">
           <label class="field"><span>대분류 · 교육과정 [별표 4] 범주</span>
             <select id="gCat"><option value="">— 범주를 고르세요 (40개) —</option></select></label>
@@ -137,7 +149,7 @@
     <section class="step" id="step2" hidden aria-labelledby="s2Title">
       <div class="step-h">
         <div>
-          <h2 id="s2Title"><span class="sn">2</span>영상 고르기</h2>
+          <h2 id="s2Title"><span class="sn">2</span>영상 고르기<button type="button" class="q-btn" data-help="s2" aria-label="2단계 도움말" title="이 단계 도움말">?</button></h2>
           <p class="muted" id="s2Sub"></p>
         </div>
         <div class="step-h-act">
@@ -162,7 +174,7 @@
     <section class="step" id="step3" hidden aria-labelledby="s3Title">
       <div class="step-h">
         <div>
-          <h2 id="s3Title"><span class="sn">3</span>가사 넣고 활동지 옵션 정하기</h2>
+          <h2 id="s3Title"><span class="sn">3</span>가사 넣고 활동지 옵션 정하기<button type="button" class="q-btn" data-help="s3" aria-label="3단계 도움말" title="이 단계 도움말">?</button></h2>
           <p class="muted" id="s3Sub"></p>
         </div>
         <div class="step-h-act"><button type="button" class="btn ghost" data-go="2">← 다른 곡 고르기</button></div>
@@ -224,7 +236,7 @@
     <section class="step" id="step4" hidden aria-labelledby="s4Title">
       <div class="step-h">
         <div>
-          <h2 id="s4Title"><span class="sn">4</span>확인하고 내려받기</h2>
+          <h2 id="s4Title"><span class="sn">4</span>확인하고 내려받기<button type="button" class="q-btn" data-help="s4" aria-label="4단계 도움말" title="이 단계 도움말">?</button></h2>
           <p class="muted" id="s4Sub"></p>
         </div>
         <div class="step-h-act">

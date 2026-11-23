@@ -133,3 +133,18 @@ export function qrDataUrl(text, px = 220) {
     return "";
   }
 }
+
+/** 공용 팝업(dialog). 닫히면 DOM에서 지워짐. [data-close] 버튼은 자동으로 닫기 */
+export function openModal({ title, html, wide = false, cls = "", onClose } = {}) {
+  const d = document.createElement("dialog");
+  d.className = `modal${wide ? " wide" : ""}${cls ? " " + cls : ""}`;
+  d.setAttribute("aria-label", title);
+  d.innerHTML = `<div class="modal-in"><div class="modal-h"><h2>${title}</h2><button type="button" class="modal-x" aria-label="닫기" data-close>×</button></div><div class="modal-b">${html}</div></div>`;
+  document.body.appendChild(d);
+  d.addEventListener("click", (e) => {
+    if (e.target === d || e.target.closest("[data-close]")) d.close();
+  });
+  d.addEventListener("close", () => { d.remove(); if (onClose) onClose(); });
+  if (d.showModal) d.showModal(); else d.setAttribute("open", "");
+  return d;
+}

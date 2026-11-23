@@ -1,4 +1,4 @@
-# 🎵 팝송 문법 활동지 생성기 (v2)
+# 🎵 팝송 문법 활동지 생성기 (v2.4)
 
 2022 개정 영어과 교육과정 **[별표 4] 의사소통에 필요한 언어 형식**이 들어간 팝송을 YouTube 영상으로 찾고,
 그 곡으로 **가사 빈칸 + 단어 활동 + 정답지**를 만들어 내려받거나 사이트에서 바로 정답을 확인하는 교사용 도구입니다.
@@ -16,18 +16,25 @@
 
 곡별 임시 보관: 같은 곡을 다시 만들 때 AI가 만든 곡 소개·표현 설명·해석·단어 뜻(교사가 고친 내용 포함)을 이 브라우저에 14일간 보관해 다시 요청하지 않습니다(최근 15곡, 3단계에서 지우기 가능).
 
-Part 2는 빈칸 단어 중 일부만 사용합니다(단어 찾기 12, 비밀 암호 8, 철자 섞기 10). ‘사라진 철자’는 빠진 철자를 순서대로 모으면 가사 속 구절(예: IF I WERE A BOY)이 완성되도록 단어를 고릅니다.
+Part 2는 빈칸 단어 중 일부만 사용하고, **번호는 1번부터 새로** 매깁니다(Part 1의 가사 빈칸 번호를 그대로 쓰면 답의 단서가 되므로). 단어 찾기 12, 비밀 암호 8, 철자 섞기 10개. ‘사라진 철자’는 단어 속 빠진 자리를 빈칸(`wa_ked` → `wa[ ]ked`)으로 두고 학생이 그 자리에 철자를 쓰며, 빠진 철자를 번호 순서대로 모으면 가사 속 구절(예: IF I WERE A BOY)이 완성됩니다.
 
 온라인 정답 확인: 가사 빈칸 · Part 1 · Part 2(단어 찾기는 첫 글자→마지막 글자 클릭) 모두 채점(전체 또는 Part별 채점·정답 보기), ‘눌러서 정답 보기’ 모드, 번호를 누르면 그 칸 정답 보기, 글자 크기 80~200%.
 
-활동지 구성: **1쪽** 곡 정보(영상 QR)+가사 빈칸·해석 → **2쪽** Part 1 Vocabulary Check + Part 2 단어 활동(단어 찾기/비밀 암호/사라진 철자/철자 섞기) → **3쪽 이후** 정답(빈칸, Part 1, Part 2, 정답 표시 가사).
+활동지 구성(항상 A4 4쪽): **1쪽** 곡 정보(영상 QR)+가사 빈칸·해석 → **2쪽** Part 1 Vocabulary Check + Part 2 단어 활동 → **3쪽** 정답(가사 빈칸, Part 1, Part 2) → **4쪽** 정답 표시 가사.
+2~4쪽은 쪽마다 한 장에 들어가도록 글자 크기를 10pt에서 최소 7pt까지 자동으로 줄입니다(미리보기의 쪽 이름 옆에 표시). 1쪽은 [1쪽에 맞추기]로 여백 → 글자 크기 순서로 맞춥니다.
+
+작업 저장: 곡을 고른 뒤부터 자동 저장됩니다. 로그인하지 않으면 이 브라우저에만(최근 30개), **구글 로그인**하면 계정에도 저장되어 다른 브라우저·기기에서 **내 작업**으로 이어서 할 수 있습니다(아래 ‘구글 로그인 설정’ 필요). API 키는 계정에 올리지 않습니다.
+
+도움말: 첫 방문 때 간단 안내 팝업이 한 번 뜨고, 오른쪽 위 **도움말** 또는 각 단계 제목 옆 **?**에서 단계별 설명을 볼 수 있습니다.
 
 ## 폴더 구조
 
 ```
 index.html            화면
 css/style.css         디자인(데스크톱·태블릿·휴대폰, 인쇄용 A4)
-js/app.js             화면 흐름
+js/app.js             화면 흐름 · 작업 저장 · 내 작업 목록
+js/cloud.js           구글 로그인 + 작업 클라우드 저장(Firebase)
+js/help.js            첫 방문 안내 · 단계별 도움말
 js/data/grammar-catalog.js  교육과정 언어 형식 목록·검색·가사 내 표현 찾기
 js/data/song-library.js     API 키 없이 쓰는 기본 곡 목록(가사는 저장하지 않음)
 js/llm-client.js      AI 키 설정·연결 상태(키 미설정/연결 미확인/요청 성공/연결 실패)
@@ -41,6 +48,7 @@ lib/providers.js      OpenAI·Claude·Gemini 연결(서버·브라우저 공용)
 api/llm.js            AI 요청 중계(Vercel 함수, 키 저장 안 함)
 api/youtube.js        YouTube 영상 찾기 + 삽입 가능 여부 확인
 api/health.js         서버 상태 확인
+api/config.js         브라우저용 Firebase 설정 전달(환경 변수 FIREBASE_CONFIG)
 vendor/               docx, QR 코드 라이브러리(MIT)
 vercel.json           Vercel 설정(서울 리전, Referrer-Policy 등)
 dev-server.mjs        내 컴퓨터에서 미리 실행
@@ -58,6 +66,41 @@ dev-server.mjs        내 컴퓨터에서 미리 실행
    - Framework Preset: **Other** (Build Command·Output Directory는 비워 둠) → **Deploy**.
 3. (선택) **Settings → Environment Variables**에 `YOUTUBE_API_KEY`(YouTube Data API v3 키)를 넣으면 공식 검색 API로 영상을 찾습니다. 없어도 동작합니다.
 4. 이후 GitHub에 파일을 다시 올리면 Vercel이 자동으로 다시 배포합니다.
+
+## 구글 로그인 설정 (Firebase · 무료)
+
+로그인하면 작업이 계정에 저장되어 학교 PC·집 PC·태블릿 어디서든 이어서 할 수 있습니다. 설정하지 않아도 사이트는 그대로 동작합니다(이 브라우저에만 저장).
+Google Cloud에서 OAuth 동의 화면을 따로 만들 필요 없이 Firebase 콘솔에서 몇 번 클릭으로 끝납니다. (무료 Spark 요금제로 충분합니다.)
+
+1. **프로젝트 만들기**: https://console.firebase.google.com → **프로젝트 추가** → 이름 입력(예: `popsong`) → Google 애널리틱스는 꺼도 됨 → 만들기.
+2. **웹 앱 등록**: 프로젝트 개요의 **</> (웹)** 아이콘 → 앱 닉네임 입력 → 앱 등록(호스팅 체크 안 함).
+   화면에 나오는 `const firebaseConfig = { apiKey: "...", authDomain: "...", ... };` 부분을 **그대로 복사**해 둡니다.
+3. **Google 로그인 켜기**: 왼쪽 메뉴 **빌드 → Authentication → 시작하기 → 로그인 방법 → Google → 사용 설정** → 프로젝트 지원 이메일 선택 → 저장.
+4. **승인된 도메인 추가**: Authentication → **설정 → 승인된 도메인 → 도메인 추가** → Vercel 주소(예: `popsong-worksheet.vercel.app`, `https://` 없이) 입력.
+   직접 연결한 도메인이 있다면 그것도 추가합니다. (`localhost`는 기본으로 들어 있습니다.)
+5. **데이터베이스 만들기**: **빌드 → Firestore Database → 데이터베이스 만들기** → 위치 `asia-northeast3 (서울)` → **프로덕션 모드**로 시작.
+6. **보안 규칙**: Firestore → **규칙** 탭에 아래 내용을 붙여 넣고 **게시**. (본인 작업만 읽고 쓸 수 있게 합니다.)
+   ```
+   rules_version = '2';
+   service cloud.firestore {
+     match /databases/{database}/documents {
+       match /users/{uid}/works/{workId} {
+         allow read, write: if request.auth != null && request.auth.uid == uid;
+       }
+     }
+   }
+   ```
+7. **Vercel에 설정 넣기**: Vercel 프로젝트 → **Settings → Environment Variables** → Key `FIREBASE_CONFIG`, Value에 2번에서 복사한 코드를 그대로 붙여 넣기 → Save.
+   그다음 **Deployments → 최근 배포의 … → Redeploy** (환경 변수는 다시 배포해야 적용됩니다).
+8. 사이트 오른쪽 위 **로그인**을 눌러 확인합니다. 로그인 후 곡을 고르면 헤더에 **계정에 저장됨**이 표시됩니다.
+
+자주 나오는 문제
+- “승인된 도메인에 없습니다” → 4번에 지금 접속한 주소(미리보기 주소 `…-git-main-….vercel.app` 포함)를 추가.
+- “Google 로그인이 켜져 있지 않습니다” → 3번 확인.
+- “저장 권한이 없습니다” → 6번 규칙을 게시했는지 확인.
+- 로그인 창이 바로 닫힘 → 브라우저 팝업 차단 해제(차단되면 페이지 이동 방식으로 자동 전환).
+- 학교망에서 `gstatic.com`이 막혀 있으면 로그인 모듈을 불러오지 못합니다(이때도 이 브라우저 저장은 동작).
+- `firebaseConfig`의 `apiKey`는 비밀 값이 아니라 브라우저에 공개되도록 만들어진 값입니다. 데이터는 6번 보안 규칙이 지킵니다.
 
 ### 내 컴퓨터에서 미리 보기
 Node.js 18 이상이 설치되어 있다면 폴더에서 `node dev-server.mjs` 실행 후 http://localhost:3000 접속.

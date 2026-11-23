@@ -6,7 +6,7 @@
 export const GAME_TYPES = {
   wordsearch: { name: "단어 찾기 (Word Search)", short: "단어 찾기", guide: "표 안에 숨어 있는 단어를 찾아 동그라미 하세요. (가로 →, 세로 ↓, 대각선 ↘ ↗)" },
   secret: { name: "비밀 암호 (Secret Code)", short: "비밀 암호", guide: "Secret Code Key를 보고 숫자를 알파벳으로 바꾸어 단어와 문장을 완성하세요." },
-  missing: { name: "사라진 철자 (Missing Letters)", short: "사라진 철자", guide: "뜻을 보고 빠진 철자를 채워 단어를 완성한 뒤, 빠진 철자를 번호 순서대로 모아 가사 속 비밀 구절을 완성하세요." },
+  missing: { name: "사라진 철자 (Missing Letters)", short: "사라진 철자", guide: "뜻을 보고 단어의 빈칸에 빠진 철자를 쓰세요. 빠진 철자를 번호 순서대로 모으면 가사 속 비밀 구절이 완성됩니다." },
   scramble: { name: "철자 섞기 (Word Shuffle)", short: "철자 섞기", guide: "섞인 철자를 바르게 배열하여 단어를 완성하세요." },
 };
 
@@ -30,6 +30,17 @@ function pickSpread(list, n) {
   if (list.length <= n) return list.slice();
   const out = [];
   for (let i = 0; i < n; i++) out.push(list[Math.floor((i * list.length) / n)]);
+  return out;
+}
+
+/**
+ * Part 2 번호는 Part 1(가사 빈칸) 번호와 무관하게 1번부터 다시 매깁니다(단서 방지).
+ * shuffle=true면 순서도 섞습니다.
+ */
+function renumberSeq(list, rand, shuffle) {
+  const out = list.slice();
+  if (shuffle) for (let i = out.length - 1; i > 0; i--) { const j = Math.floor(rand() * (i + 1)); [out[i], out[j]] = [out[j], out[i]]; }
+  out.forEach((x, i) => { x.seq = i + 1; });
   return out;
 }
 
@@ -88,7 +99,7 @@ function wordSearch(vocab, rand, opts) {
   const ALPHA = "ABCDEFGHIJKLMNOPRSTUWY";
   for (let r = 0; r < size; r++) for (let c = 0; c < size; c++) if (!grid[r][c]) grid[r][c] = ALPHA[Math.floor(rand() * ALPHA.length)];
   const cellsOf = new Map(placed.map((p) => [p.word, p.cells]));
-  const order = all.filter((w) => cellsOf.has(w.word)).map((w) => ({ ...w, cells: cellsOf.get(w.word) }));
+  const order = renumberSeq(all.filter((w) => cellsOf.has(w.word)).map((w) => ({ ...w, cells: cellsOf.get(w.word) })), rand, true);
   const skipped = all.filter((w) => !cellsOf.has(w.word)).map((w) => w.display);
   return { type: "wordsearch", size, grid, words: order, answerCells: Array.from(answerCells), skipped };
 }
@@ -107,7 +118,7 @@ function secretCode(vocab, rand, opts) {
     ko: p.ko || "",
     words: p.text.split(/\s+/).map((w) => ({ word: letters(w), code: encode(w), raw: w })).filter((w) => w.word),
   }));
-  return { type: "secret", easy, hard };
+  return { type: "secret", easy: renumberSeq(easy, rand, true), hard };
 }
 
 /**
@@ -143,7 +154,7 @@ function missingLetters(vocab, rand, phrases) {
       const pref = idxs.filter((i) => i > 0);
       const use = pref.length ? pref : idxs;
       const pick = use[Math.floor(rand() * use.length)];
-      return { order: li + 1, num: v.num, word, shown: blankOne(word, pick), missing: need, meaning: v.meaning };
+      return { order: li + 1, seq: li + 1, num: v.num, word, shown: blankOne(word, pick), missing: need, meaning: v.meaning };
     });
     return { type: "missing", items, phrase: p.text, phraseWords: p.text.split(/\s+/).map((w) => letters(w).length).filter(Boolean) };
   }
@@ -155,7 +166,7 @@ function missingLetters(vocab, rand, phrases) {
     const pick = idxs[Math.floor(rand() * idxs.length)];
     return { order: 0, num: v.num, word, shown: blankOne(word, pick), missing: word[pick].toUpperCase(), meaning: v.meaning };
   });
-  return { type: "missing", items, phrase: "", phraseWords: [] };
+  return { type: "missing", items: renumberSeq(items, rand, true), phrase: "", phraseWords: [] };
 }
 
 function shuffleWord(word, rand) {
@@ -175,5 +186,5 @@ function scramble(vocab, rand) {
   const items = pickSpread(vocab.filter((v) => letters(v.head || v.answer).length >= 3), PART2_LIMIT.scramble).map((v) => ({
     num: v.num, word: v.head || v.answer, shuffled: shuffleWord(v.head || v.answer, rand), meaning: v.meaning,
   }));
-  return { type: "scramble", items };
+  return { type: "scramble", items: renumberSeq(items, rand, true) };
 }

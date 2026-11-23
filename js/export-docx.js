@@ -6,7 +6,7 @@
  *
  * 화면 미리보기와 같은 치수(mm)·줄 간격(고정값)을 사용해 '1쪽에 맞추기' 결과가 문서에도 그대로 적용되게 합니다.
  */
-import { visibleBlanks, vocabList, vocabCheckRows, threeColumnRows, gameData, MARGINS, DOC_FONTS } from "./worksheet.js";
+import { visibleBlanks, vocabList, vocabCheckRows, threeColumnRows, gameData, MARGINS, DOC_FONTS, pageFont } from "./worksheet.js";
 import { segmentLine } from "./lyrics.js";
 import { findGrammarRanges } from "./data/grammar-catalog.js";
 import { GAME_TYPES } from "./games.js";
@@ -49,7 +49,7 @@ export async function buildDocx(ws, qrDataUrl) {
   const CW = PAGE_W - 2 * ML; // 본문 폭
   const fontName = (DOC_FONTS[ws.options.docFont] || DOC_FONTS.malgun).docx;
   const FONT = { ascii: fontName, hAnsi: fontName, eastAsia: fontName, cs: fontName };
-  const base = ws.options.fontSize || 10;
+  let base = ws.options.fontSize || 10; // 쪽마다 바뀜(1쪽에 맞춘 크기)
   const GREEN = "006241", GREEN_D = "1E3932", MINT = "E4F0EA", LIGHT = "F3F8F5", LINE = "9FB1A8", INK = "1F2421", GRAY = "6B7280", RED = "C00000";
 
   const half = (n) => Math.round(n * 2);
@@ -170,12 +170,12 @@ export async function buildDocx(ws, qrDataUrl) {
   const vocabTable = (answer) => {
     const grp = [0.046, 0.134, 0.1533];
     const W = pctW([...grp, ...grp, ...grp]);
-    const header = new TableRow({ tableHeader: true, height: { value: mm(7), rule: HeightRule.ATLEAST }, children: [0, 1, 2].flatMap((k) => [
+    const header = new TableRow({ tableHeader: true, height: { value: mm(0.7 * base), rule: HeightRule.ATLEAST }, children: [0, 1, 2].flatMap((k) => [
       cell(P(run("")), { w: W[k * 3], fill: MINT, pl: 0 }),
       cell(P(run("단어", { bold: true, color: GREEN }), { align: AlignmentType.CENTER }), { w: W[k * 3 + 1], fill: MINT }),
       cell(P(run("뜻", { bold: true, color: GREEN }), { align: AlignmentType.CENTER }), { w: W[k * 3 + 2], fill: MINT }),
     ]) });
-    const rows = threeColumnRows(vocabCheckRows(ws)).map((r) => new TableRow({ height: { value: mm(9.5), rule: HeightRule.ATLEAST }, children: r.flatMap((it, k) => {
+    const rows = threeColumnRows(vocabCheckRows(ws)).map((r) => new TableRow({ height: { value: mm(0.95 * base), rule: HeightRule.ATLEAST }, children: r.flatMap((it, k) => {
       if (!it) return [cell(P(run("")), { w: W[k * 3], fill: LIGHT, pl: 0 }), cell(P(run("")), { w: W[k * 3 + 1] }), cell(P(run("")), { w: W[k * 3 + 2] })];
       const showW = answer || it.show === "word";
       const showM = answer || it.show === "meaning";
@@ -191,14 +191,31 @@ export async function buildDocx(ws, qrDataUrl) {
   };
 
   /* ---------- 2쪽: Part 2 ---------- */
+  const missingRuns = (it, answer) => {
+    const k = it.shown.indexOf("_");
+    return [
+      run(it.shown.slice(0, k), { bold: true }),
+      answer ? run(it.missing.toLowerCase(), { bold: true, color: RED, underline: true }) : run("\u00A0\u00A0\u00A0\u00A0", { underline: true }),
+      run(it.shown.slice(k + 1), { bold: true }),
+    ];
+  };
+  const answerGrid = (cellsRuns, wideRuns) => {
+    const W = pctW([0.25, 0.25, 0.25, 0.25]);
+    const rows = [];
+    for (let i = 0; i < cellsRuns.length; i += 4) {
+      rows.push(new TableRow({ height: { value: mm(0.65 * base), rule: HeightRule.ATLEAST }, children: [0, 1, 2, 3].map((j) => cell(P(cellsRuns[i + j] || [run("")]), { w: W[j], pt: mm(0.25 * base) })) }));
+    }
+    (wideRuns || []).forEach((r) => rows.push(new TableRow({ children: [cell(P(r), { w: CW, colSpan: 4, pt: mm(0.25 * base) })] })));
+    return table(rows, W);
+  };
   const gameBlocks = (answer) => {
     const game = gameData(ws);
     const out = [];
     const halves = (arr) => { const h = Math.ceil(arr.length / 2); return [arr.slice(0, h), arr.slice(h)]; };
+    const sc = base / 10;
 
     if (game.type === "wordsearch") {
-      const cellMm = game.size > 13 ? 6.2 : 7.4;
-      const cw = mm(cellMm);
+      const cw = mm((game.size > 13 ? 6.2 : 7.4) * sc * (answer ? 0.8 : 1));
       const ans = new Set(game.answerCells);
       const grid = table(game.grid.map((row, r) => new TableRow({ height: { value: cw, rule: HeightRule.EXACT }, children: row.map((ch, c) => {
         const on = answer && ans.has(r + "," + c);
@@ -212,9 +229,9 @@ export async function buildDocx(ws, qrDataUrl) {
       const list = table([
         new TableRow({ children: [cell(P(run(`찾을 단어 (${game.words.length})`, { bold: true, color: GREEN })), { w: listW, colSpan: 3, borders: noEdges, pl: 0 })] }),
         ...game.words.map((w) => new TableRow({ children: [
-          cell(P(run(w.num, { size: base * 0.85, color: GRAY }), { align: AlignmentType.RIGHT, size: base * 0.85 }), { w: lw[0], borders: dotted, pl: mm(0.5), pt: mm(0.8) }),
-          cell(P(run(w.display, { bold: true })), { w: lw[1], borders: dotted, pt: mm(0.8) }),
-          cell(P(run(w.meaning || "", { size: base * 0.9, color: "444444" }), { size: base * 0.9 }), { w: lw[2], borders: dotted, pt: mm(0.8) }),
+          cell(P(run(w.seq, { size: base * 0.85, color: GRAY }), { align: AlignmentType.RIGHT, size: base * 0.85 }), { w: lw[0], borders: dotted, pl: mm(0.5), pt: mm(0.08 * base) }),
+          cell(P(run(w.display, { bold: true })), { w: lw[1], borders: dotted, pt: mm(0.08 * base) }),
+          cell(P(run(w.meaning || "", { size: base * 0.9, color: "444444" }), { size: base * 0.9 }), { w: lw[2], borders: dotted, pt: mm(0.08 * base) }),
         ] })),
       ], lw);
       out.push(new Table({
@@ -226,71 +243,91 @@ export async function buildDocx(ws, qrDataUrl) {
         width: { size: CW, type: WidthType.DXA }, columnWidths: [gridW, mm(5), listW], layout: TableLayoutType.FIXED,
       }));
       if (game.skipped && game.skipped.length) out.push(P(run("※ 너무 길어 표에 넣지 못한 단어: " + game.skipped.join(", "), { size: base * 0.85, color: GRAY }), { before: mm(1.5), size: base * 0.85 }));
-    } else if (game.type === "secret") {
+      return out;
+    }
+
+    // 정답 쪽: 간결한 4칸 표
+    if (answer) {
+      if (game.type === "secret") {
+        out.push(answerGrid(game.easy.map((e) => [run(e.seq + ". ", { color: GRAY, size: base * 0.85 }), run(e.word, { bold: true, color: RED })]),
+          game.hard.map((h, i) => [run(`도전 ${i + 1}.  `, { color: GRAY, size: base * 0.85 }), run(h.phrase.toUpperCase(), { bold: true, color: RED })])));
+      } else if (game.type === "missing") {
+        out.push(answerGrid(game.items.map((it) => [run(it.seq + ". ", { color: GRAY, size: base * 0.85 }), ...missingRuns(it, true)]),
+          game.phrase ? [[run("비밀 구절  ", { color: GRAY, size: base * 0.85 }), run(game.phrase, { bold: true, color: RED })]] : []));
+      } else {
+        out.push(answerGrid(game.items.map((it) => [run(it.seq + ". ", { color: GRAY, size: base * 0.85 }), run(it.word, { bold: true, color: RED })])));
+      }
+      return out;
+    }
+
+    if (game.type === "secret") {
       const A = "ABCDEFGHIJKLMNOPQRSTUVWXYZ".split("");
       const kw = pctW(Array(13).fill(1 / 13));
       const keyRows = [A.slice(0, 13), A.slice(13)].flatMap((part, pi) => [
-        new TableRow({ children: part.map((k, i) => cell(P(run(k, { bold: true, color: GREEN }), { align: AlignmentType.CENTER }), { w: kw[i], fill: MINT, pt: mm(0.6), pl: 0 })) }),
-        new TableRow({ children: part.map((k, i) => cell(P(run(i + 1 + pi * 13), { align: AlignmentType.CENTER }), { w: kw[i], pt: mm(0.6), pl: 0 })) }),
+        new TableRow({ children: part.map((k, i) => cell(P(run(k, { bold: true, color: GREEN }), { align: AlignmentType.CENTER }), { w: kw[i], fill: MINT, pt: mm(0.06 * base), pl: 0 })) }),
+        new TableRow({ children: part.map((k, i) => cell(P(run(i + 1 + pi * 13), { align: AlignmentType.CENTER }), { w: kw[i], pt: mm(0.06 * base), pl: 0 })) }),
       ]);
       out.push(table(keyRows, kw));
-      out.push(P(run("[ 단어 ] 번호는 가사 빈칸 번호와 같습니다.", { bold: true, color: GREEN }), { before: mm(3), after: mm(1.5) }));
+      out.push(P(run("[ 단어 ]", { bold: true, color: GREEN }), { before: mm(0.3 * base), after: mm(0.15 * base) }));
       const item = (e) => [
-        P([run(`${e.num}.  `, { bold: true, color: GREEN }), run(e.code.join("-"))]),
-        P([run("➜  ", { color: GRAY }), run(answer ? e.word : e.word.split("").map(() => "_").join(" "), { bold: answer, color: answer ? RED : INK }), run(e.meaning ? `   (${e.meaning})` : "", { size: base * 0.85, color: GRAY })], { after: mm(2.2) }),
+        P([run(`${e.seq}.  `, { bold: true, color: GREEN }), run(e.code.join("-"))]),
+        P([run("➜  ", { color: GRAY }), run(e.word.split("").map(() => "_").join(" ")), run(e.meaning ? `   (${e.meaning})` : "", { size: base * 0.85, color: GRAY })], { after: mm(0.22 * base) }),
       ];
       const [a, b] = halves(game.easy);
       out.push(twoCol(a.flatMap(item), b.flatMap(item)));
       if (game.hard.length) {
-        out.push(P(run("[ 도전 ] 가사 속 구절", { bold: true, color: GREEN }), { before: mm(2), after: mm(1.5) }));
+        out.push(P(run("[ 도전 ] 가사 속 구절", { bold: true, color: GREEN }), { before: mm(0.2 * base), after: mm(0.15 * base) }));
         game.hard.forEach((h, i) => {
           out.push(P([run(`${i + 1}.  `, { bold: true, color: GREEN }), run(h.words.map((w) => "( " + w.code.join("-") + " )").join("  "))]));
-          out.push(P(run("➜  " + (answer ? h.phrase.toUpperCase() : h.words.map((w) => w.word.split("").map(() => "_").join(" ")).join("      ")), { bold: answer, color: answer ? RED : INK }), { after: mm(2.5) }));
+          out.push(P(run("➜  " + h.words.map((w) => w.word.split("").map(() => "_").join(" ")).join("      ")), { after: mm(0.25 * base) }));
         });
       }
-    } else {
-      const isMissing = game.type === "missing";
-      const ordered = isMissing && game.phrase;
-      const colW = Math.round((CW - mm(4)) / 2);
-      const fr = ordered ? [0.1, 0.1, 0.32, 0.26] : [0.11, 0.35, 0.27];
-      const W = fr.map((f) => Math.round(colW * f));
-      W.push(colW - W.reduce((x, y) => x + y, 0));
-      const heads = (ordered ? ["순서"] : []).concat(["No", isMissing ? "단어" : "섞인 철자", "뜻", isMissing ? "빠진 철자" : "정답"]);
-      const mk = (items) => {
-        const headRow = new TableRow({ tableHeader: true, height: { value: mm(7), rule: HeightRule.ATLEAST }, children: heads.map((h, i) => cell(P(run(h, { bold: true, color: GREEN, size: base * 0.9 }), { align: AlignmentType.CENTER, size: base * 0.9 }), { w: W[i], fill: MINT, pl: mm(0.6) })) });
-        const rows = items.map((it) => new TableRow({ height: { value: mm(8.5), rule: HeightRule.ATLEAST }, children: [
-          ...(ordered ? [cell(P(run(it.order, { bold: true, color: GREEN }), { align: AlignmentType.CENTER }), { w: W[0], fill: LIGHT, pl: 0 })] : []),
-          cell(P(run(it.num, { bold: true }), { align: AlignmentType.CENTER }), { w: W[ordered ? 1 : 0], fill: LIGHT, pl: 0 }),
-          cell(P(run(isMissing ? (answer ? it.word : it.shown.split("").join(" ")) : it.shuffled, { bold: true })), { w: W[ordered ? 2 : 1] }),
-          cell(P(run(it.meaning || "", { size: base * 0.88, color: "444444" }), { size: base * 0.88, mult: 1.3 }), { w: W[ordered ? 3 : 2] }),
-          cell(P(run(answer ? (isMissing ? it.missing : it.word) : "", { bold: true, color: RED })), { w: W[ordered ? 4 : 3] }),
-        ] }));
-        return [table([headRow, ...rows], W)];
-      };
-      const [a, b] = halves(game.items);
-      out.push(twoCol(mk(a), b.length ? mk(b) : []));
-      if (ordered) {
-        out.push(P([run("[ 비밀 구절 ]  ", { bold: true, color: GREEN }), run("빠진 철자를 ‘순서’대로 모아 가사 속 구절을 완성하세요.")], { before: mm(4), after: mm(2) }));
-        let k = 0;
-        const groups = game.phraseWords.map((n) => Array.from({ length: n }, () => game.items[k++]));
-        const flat = [];
-        groups.forEach((gr, gi) => { gr.forEach((it) => flat.push(it)); if (gi < groups.length - 1) flat.push(null); });
-        const bw = Math.min(mm(8.5), Math.floor(CW / flat.length));
-        out.push(table([
-          new TableRow({ children: flat.map((it) => it ? cell(P(run(it.order, { size: 6.5, color: GRAY }), { size: 6.5 }), { w: bw, pt: mm(0.3), pl: mm(0.5), borders: { top: edge, left: edge, right: edge, bottom: none } }) : cell(P(run("")), { w: bw, borders: noEdges, pt: 0 })) }),
-          new TableRow({ height: { value: mm(6.5), rule: HeightRule.ATLEAST }, children: flat.map((it) => it ? cell(P(run(answer ? it.missing : "", { bold: true, color: RED, size: base + 2 }), { align: AlignmentType.CENTER, size: base + 2 }), { w: bw, pt: 0, pl: 0, borders: { top: none, left: edge, right: edge, bottom: edge } }) : cell(P(run("")), { w: bw, borders: noEdges, pt: 0 })) }),
-        ], Array(flat.length).fill(bw)));
-        out.push(P(run(answer ? "정답: " + game.phrase : "구절: __________________________________________", { bold: answer, color: answer ? RED : INK }), { before: mm(3) }));
-      }
+      return out;
+    }
+
+    const isMissing = game.type === "missing";
+    const colW = Math.round((CW - mm(4)) / 2);
+    const fr = isMissing ? [0.12, 0.48] : [0.11, 0.36, 0.26];
+    const W = fr.map((f) => Math.round(colW * f));
+    W.push(colW - W.reduce((x, y) => x + y, 0));
+    const heads = isMissing ? ["No", "단어 (빈칸에 철자 쓰기)", "뜻"] : ["No", "섞인 철자", "뜻", "정답"];
+    const mk = (items) => {
+      const headRow = new TableRow({ tableHeader: true, height: { value: mm(0.7 * base), rule: HeightRule.ATLEAST }, children: heads.map((h, i) => cell(P(run(h, { bold: true, color: GREEN, size: base * 0.9 }), { align: AlignmentType.CENTER, size: base * 0.9 }), { w: W[i], fill: MINT, pl: mm(0.6) })) });
+      const rows = items.map((it) => new TableRow({ height: { value: mm(0.85 * base), rule: HeightRule.ATLEAST }, children: [
+        cell(P(run(it.seq, { bold: true }), { align: AlignmentType.CENTER }), { w: W[0], fill: LIGHT, pl: 0 }),
+        cell(P(isMissing ? missingRuns(it, false) : run(it.shuffled, { bold: true })), { w: W[1] }),
+        cell(P(run(it.meaning || "", { size: base * 0.88, color: "444444" }), { size: base * 0.88, mult: 1.3 }), { w: W[2] }),
+        ...(isMissing ? [] : [cell(P(run("")), { w: W[3] })]),
+      ] }));
+      return [table([headRow, ...rows], W)];
+    };
+    const [a, b] = halves(game.items);
+    out.push(twoCol(mk(a), b.length ? mk(b) : []));
+    if (isMissing && game.phrase) {
+      out.push(P([run("[ 비밀 구절 ]  ", { bold: true, color: GREEN }), run("빠진 철자를 번호 순서대로 모아 가사 속 구절을 완성하세요.")], { before: mm(0.4 * base), after: mm(0.2 * base) }));
+      let k = 0;
+      const groups = game.phraseWords.map((n) => Array.from({ length: n }, () => game.items[k++]));
+      const flat = [];
+      groups.forEach((gr, gi) => { gr.forEach((it) => flat.push(it)); if (gi < groups.length - 1) flat.push(null); });
+      const bw = Math.min(mm(0.85 * base), Math.floor(CW / flat.length));
+      out.push(table([
+        new TableRow({ children: flat.map((it) => it ? cell(P(run(it.seq, { size: 6.5, color: GRAY }), { size: 6.5 }), { w: bw, pt: mm(0.3), pl: mm(0.5), borders: { top: edge, left: edge, right: edge, bottom: none } }) : cell(P(run("")), { w: bw, borders: noEdges, pt: 0 })) }),
+        new TableRow({ height: { value: mm(0.65 * base), rule: HeightRule.ATLEAST }, children: flat.map((it) => it ? cell(P(run("")), { w: bw, pt: 0, pl: 0, borders: { top: none, left: edge, right: edge, bottom: edge } }) : cell(P(run("")), { w: bw, borders: noEdges, pt: 0 })) }),
+      ], Array(flat.length).fill(bw)));
+      out.push(P(run("구절: __________________________________________"), { before: mm(0.3 * base) }));
     }
     return out;
   };
 
-  /* ---------- 문서 조립 ---------- */
+  /* ---------- 문서 조립 (쪽마다 맞춘 글자 크기 적용) ---------- */
   const v = vocabList(ws);
   const vocabGuide = ws.options.vocabMode === "word" ? "단어의 뜻을 빈칸에 적어 보세요." : ws.options.vocabMode === "meaning" ? "뜻을 보고 알맞은 단어를 적어 보세요." : "빈칸에 알맞은 단어 또는 뜻을 적어 보세요.";
   const studentRight = "(      )학년   (      )반   이름 (                    )";
 
+  base = pageFont(ws, "p1");
+  const lyr1 = lyricParas(false);
+
+  base = pageFont(ws, "p2");
   const page2 = [
     miniHead(`${ws.song.title} · ${ws.song.artist}`, studentRight),
     partTitle("Part 1. Vocabulary Check"),
@@ -301,18 +338,23 @@ export async function buildDocx(ws, qrDataUrl) {
     ...gameBlocks(false),
   ];
 
+  base = pageFont(ws, "p3");
   const aw = pctW([0.06, 0.273, 0.06, 0.273, 0.06, 0.274]);
-  const ansTable = table(threeColumnRows(v).map((r) => new TableRow({ height: { value: mm(7), rule: HeightRule.ATLEAST }, children: r.flatMap((it, k) => [
+  const ansTable = table(threeColumnRows(v).map((r) => new TableRow({ height: { value: mm(0.7 * base), rule: HeightRule.ATLEAST }, children: r.flatMap((it, k) => [
     cell(P(run(it ? it.num + ")" : "", { bold: true }), { align: AlignmentType.CENTER }), { w: aw[k * 2], fill: LIGHT, pl: 0 }),
     cell(P(run(it ? it.answer : "", { bold: true, color: RED })), { w: aw[k * 2 + 1] }),
   ]) })), aw);
-
   const page3 = [
     miniHead(`[Answer Key] ${ws.song.title} · ${ws.song.artist}`, "교사용"),
     partTitle("가사 빈칸 정답"), ansTable,
     partTitle("Part 1. Vocabulary Check 정답"), vocabTable(true),
     partTitle("Part 2. " + GAME_TYPES[ws.options.game].name + " 정답"), ...gameBlocks(true),
   ];
+
+  base = pageFont(ws, "p4");
+  const p4head = miniHead("[Answer Key] 정답이 표시된 가사", "교사용");
+  const lyr4 = lyricParas(true);
+  base = pageFont(ws, "p1");
 
   const cols = { count: 2, space: mm(7), separate: true };
   return new Document({
@@ -321,12 +363,12 @@ export async function buildDocx(ws, qrDataUrl) {
     styles: { default: { document: { run: { font: FONT, size: half(base), color: INK } } } },
     sections: [
       { properties: { page: PAGE }, children: [head, info, gap(mm(3.5))] },
-      { properties: { type: SectionType.CONTINUOUS, page: PAGE, column: cols }, children: lyricParas(false) },
+      { properties: { type: SectionType.CONTINUOUS, page: PAGE, column: cols }, children: lyr1 },
       { properties: { type: SectionType.CONTINUOUS, page: PAGE }, children: [gap(20)] },
       { properties: { type: SectionType.NEXT_PAGE, page: PAGE }, children: page2 },
       { properties: { type: SectionType.NEXT_PAGE, page: PAGE }, children: page3 },
-      { properties: { type: SectionType.NEXT_PAGE, page: PAGE }, children: [miniHead("[Answer Key] 정답이 표시된 가사", "교사용")] },
-      { properties: { type: SectionType.CONTINUOUS, page: PAGE, column: cols }, children: lyricParas(true) },
+      { properties: { type: SectionType.NEXT_PAGE, page: PAGE }, children: [p4head] },
+      { properties: { type: SectionType.CONTINUOUS, page: PAGE, column: cols }, children: lyr4 },
       { properties: { type: SectionType.CONTINUOUS, page: PAGE }, children: [gap(20)] },
     ],
   });

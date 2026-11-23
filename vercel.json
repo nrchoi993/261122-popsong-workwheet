@@ -1,22 +1,44 @@
 {
   "$schema": "https://openapi.vercel.sh/vercel.json",
-  "regions": ["icn1"],
+  "regions": [
+    "icn1"
+  ],
   "functions": {
-    "api/llm.js": { "maxDuration": 60 },
-    "api/youtube.js": { "maxDuration": 30 },
-    "api/health.js": { "maxDuration": 10 }
+    "api/llm.js": {
+      "maxDuration": 60
+    },
+    "api/youtube.js": {
+      "maxDuration": 30
+    },
+    "api/health.js": {
+      "maxDuration": 10
+    },
+    "api/config.js": {
+      "maxDuration": 10
+    }
   },
   "headers": [
     {
       "source": "/(.*)",
       "headers": [
-        { "key": "Referrer-Policy", "value": "strict-origin-when-cross-origin" },
-        { "key": "X-Content-Type-Options", "value": "nosniff" }
+        {
+          "key": "Referrer-Policy",
+          "value": "strict-origin-when-cross-origin"
+        },
+        {
+          "key": "X-Content-Type-Options",
+          "value": "nosniff"
+        }
       ]
     },
     {
       "source": "/vendor/(.*)",
-      "headers": [{ "key": "Cache-Control", "value": "public, max-age=604800, immutable" }]
+      "headers": [
+        {
+          "key": "Cache-Control",
+          "value": "public, max-age=604800, immutable"
+        }
+      ]
     }
   ]
 }

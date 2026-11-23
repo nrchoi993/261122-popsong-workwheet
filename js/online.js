@@ -51,12 +51,12 @@ function vocabHTML(ws) {
 function part2HTML(ws, game) {
   if (game.type === "wordsearch") {
     const grid = game.grid.map((row, r) => `<div class="wsr">${row.map((ch, c) => `<button type="button" class="wsc" data-r="${r}" data-c="${c}">${ch}</button>`).join("")}</div>`).join("");
-    const chips = game.words.map((w) => `<button type="button" class="wchip" data-word="${esc(w.word)}" title="눌러서 위치 보기(정답 보기 모드)"><small>${w.num}</small> ${esc(w.display)}</button>`).join("");
+    const chips = game.words.map((w) => `<button type="button" class="wchip" data-word="${esc(w.word)}" title="눌러서 위치 보기(정답 보기 모드)"><small>${w.seq}</small> ${esc(w.display)}</button>`).join("");
     return `<p class="muted small">첫 글자를 누른 뒤 마지막 글자를 누르면 단어가 표시됩니다. (가로·세로·대각선)</p>
       <div class="ol-ws"><div class="ws-board" style="--n:${game.size}">${grid}</div><div class="ws-chips">${chips}</div></div>`;
   }
   if (game.type === "secret") {
-    const easy = game.easy.map((e) => `<div class="p2q"><button type="button" class="vq-n" data-peek>${e.num}</button><div class="p2p"><span class="code">${e.code.join("-")}</span>${e.meaning ? ` <span class="muted">(${esc(e.meaning)})</span>` : ""}</div><input ${inputAttrs(e.word, e.num + "번 암호", 'data-sec="p2" data-kind="word" placeholder="단어"')}><span class="vq-r"></span></div>`).join("");
+    const easy = game.easy.map((e) => `<div class="p2q"><button type="button" class="vq-n" data-peek>${e.seq}</button><div class="p2p"><span class="code">${e.code.join("-")}</span>${e.meaning ? ` <span class="muted">(${esc(e.meaning)})</span>` : ""}</div><input ${inputAttrs(e.word, e.seq + "번 암호", 'data-sec="p2" data-kind="word" placeholder="단어"')}><span class="vq-r"></span></div>`).join("");
     const hard = game.hard.map((h, i) => `<div class="p2q wide"><button type="button" class="vq-n" data-peek>도전${i + 1}</button><div class="p2p"><span class="code">${h.words.map((w) => "(" + w.code.join("-") + ")").join(" ")}</span></div><input ${inputAttrs(h.phrase, "도전 " + (i + 1), 'data-sec="p2" data-kind="word" placeholder="구절"')}><span class="vq-r"></span></div>`).join("");
     return `<div class="p2-key">${"ABCDEFGHIJKLMNOPQRSTUVWXYZ".split("").map((k, i) => `<span><b>${k}</b>${i + 1}</span>`).join("")}</div><div class="p2-grid">${easy}</div>${hard ? `<div class="p2-grid">${hard}</div>` : ""}`;
   }
@@ -64,8 +64,8 @@ function part2HTML(ws, game) {
     const items = game.items.map((it, i) => {
       const k = it.shown.indexOf("_");
       const pre = esc(it.shown.slice(0, k)), post = esc(it.shown.slice(k + 1));
-      const slot = `<input ${inputAttrs(it.missing, (game.phrase ? it.order + "번째 " : it.num + "번 ") + "빠진 철자", `data-sec="p2" data-kind="word" data-ml="${i}" maxlength="1" class="slot"`)}>`;
-      return `<div class="mlq"><button type="button" class="vq-n" data-peek title="정답 보기">${game.phrase ? it.order : it.num}</button><div class="mlw"><span class="ml-word">${pre}${slot}${post}</span><span class="ml-m">${game.phrase ? `<small>${it.num}번</small> ` : ""}${esc(it.meaning || "")}</span></div><span class="vq-r"></span></div>`;
+      const slot = `<input ${inputAttrs(it.missing, it.seq + "번 빠진 철자", `data-sec="p2" data-kind="word" data-ml="${i}" maxlength="1" class="slot"`)}>`;
+      return `<div class="mlq"><button type="button" class="vq-n" data-peek title="정답 보기">${it.seq}</button><div class="mlw"><span class="ml-word">${pre}${slot}${post}</span><span class="ml-m">${esc(it.meaning || "")}</span></div><span class="vq-r"></span></div>`;
     }).join("");
     let box = "";
     if (game.phrase) {
@@ -76,7 +76,7 @@ function part2HTML(ws, game) {
     }
     return `<p class="muted small">단어 속 빈칸에 빠진 철자를 쓰세요. ‘눌러서 정답 보기’ 모드에서는 빈칸을 누르면 철자가 나타납니다.</p><div class="ml-grid">${items}</div>${box}`;
   }
-  return `<div class="p2-grid">${game.items.map((it) => `<div class="p2q"><button type="button" class="vq-n" data-peek>${it.num}</button><div class="p2p"><span class="mono">${esc(it.shuffled)}</span> <span class="muted">${esc(it.meaning || "")}</span></div><input ${inputAttrs(it.word, it.num + "번 단어", 'data-sec="p2" data-kind="word" placeholder="단어"')}><span class="vq-r"></span></div>`).join("")}</div>`;
+  return `<div class="p2-grid">${game.items.map((it) => `<div class="p2q"><button type="button" class="vq-n" data-peek>${it.seq}</button><div class="p2p"><span class="mono">${esc(it.shuffled)}</span> <span class="muted">${esc(it.meaning || "")}</span></div><input ${inputAttrs(it.word, it.seq + "번 단어", 'data-sec="p2" data-kind="word" placeholder="단어"')}><span class="vq-r"></span></div>`).join("")}</div>`;
 }
 
 function secHead(title) {

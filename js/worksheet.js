@@ -18,10 +18,16 @@ export const DOC_FONTS = {
   nanum: { name: "나눔고딕", docx: "NanumGothic", css: "'NanumGothic', '나눔고딕'", note: "PC에 나눔고딕이 설치된 경우" },
   noto: { name: "Noto Sans KR", docx: "Noto Sans CJK KR", css: "'Noto Sans CJK KR', 'Noto Sans KR'", note: "Noto Sans KR(CJK)이 설치된 경우" },
 };
-export function pageStyle(ws, measureFont) {
+/** 쪽별 글자 크기: p1(가사)은 fontSize, 나머지는 쪽마다 1쪽에 맞게 자동 조정 */
+export function pageFont(ws, key) {
+  if (!key || key === "p1") return ws.options.fontSize;
+  const pf = ws.options.pageFont || {};
+  return pf[key] || 10;
+}
+export function pageStyle(ws, measureFont, key = "p1") {
   const pad = MARGINS[ws.options.margin] || MARGINS.normal;
   const f = measureFont ? `;font-family:${(DOC_FONTS[ws.options.docFont] || DOC_FONTS.malgun).css}, var(--font)` : "";
-  return `--ws-font:${ws.options.fontSize}pt;--ws-pad:${pad}mm${f}`;
+  return `--ws-font:${pageFont(ws, key)}pt;--ws-pad:${pad}mm${f}`;
 }
 
 export const DEFAULT_OPTIONS = {
@@ -300,75 +306,99 @@ function halves(arr) {
   return [arr.slice(0, h), arr.slice(h)];
 }
 
-function gameHTML(ws, game, answer) {
+/** 단어 속 빠진 자리를 빈칸(쓰는 칸)으로 */
+function missingWordHTML(it, answer) {
+  const k = it.shown.indexOf("_");
+  const pre = esc(it.shown.slice(0, k)), post = esc(it.shown.slice(k + 1));
+  return `${pre}<span class="mslot${answer ? " a" : ""}">${answer ? esc(it.missing.toLowerCase()) : ""}</span>${post}`;
+}
+
+function gameHTML(ws, game, answer, fs) {
+  const scale = (fs || 10) / 10;
   if (game.type === "wordsearch") {
     const ans = new Set(game.answerCells);
     const grid = game.grid.map((row, r) => `<tr>${row.map((ch, c) => `<td class="${answer && ans.has(r + "," + c) ? "on" : ""}">${ch}</td>`).join("")}</tr>`).join("");
-    const words = game.words.map((w) => `<li><span class="wn">${w.num}</span><b>${esc(w.display)}</b><span class="wm">${esc(w.meaning || "")}</span></li>`).join("");
+    const cell = (game.size > 13 ? 6.2 : 7.4) * scale * (answer ? 0.8 : 1);
     const skip = game.skipped && game.skipped.length ? `<div class="g-skip">※ 너무 길어 표에 넣지 못한 단어: ${game.skipped.map(esc).join(", ")}</div>` : "";
-    const cell = game.size > 13 ? 6.2 : 7.4;
-    return `<div class="g-ws"><table class="ws-grid" style="--cell:${cell}mm"><tbody>${grid}</tbody></table><div class="g-words"><b>찾을 단어 (${game.words.length})</b><ul class="g-wlist">${words}</ul>${skip}</div></div>`;
+    const words = game.words.map((w) => `<li><span class="wn">${w.seq}</span><b>${esc(w.display)}</b><span class="wm">${esc(w.meaning || "")}</span></li>`).join("");
+    return `<div class="g-ws"><table class="ws-grid" style="--cell:${cell.toFixed(2)}mm"><tbody>${grid}</tbody></table><div class="g-words"><b>찾을 단어 (${game.words.length})</b><ul class="g-wlist">${words}</ul>${skip}</div></div>`;
   }
   if (game.type === "secret") {
+    if (answer) {
+      const items = game.easy.map((e) => `<div><span class="an">${e.seq}.</span> <b>${esc(e.word)}</b></div>`).join("");
+      const hard = game.hard.map((h, i) => `<div class="wide"><span class="an">도전 ${i + 1}.</span> <b>${esc(h.phrase.toUpperCase())}</b></div>`).join("");
+      return `<div class="ans-grid">${items}${hard}</div>`;
+    }
     const key = "ABCDEFGHIJKLMNOPQRSTUVWXYZ".split("");
     const keyTable = `<table class="ws-key"><tbody>
       <tr>${key.slice(0, 13).map((k) => `<th>${k}</th>`).join("")}</tr><tr>${key.slice(0, 13).map((k, i) => `<td>${i + 1}</td>`).join("")}</tr>
       <tr>${key.slice(13).map((k) => `<th>${k}</th>`).join("")}</tr><tr>${key.slice(13).map((k, i) => `<td>${i + 14}</td>`).join("")}</tr>
     </tbody></table>`;
-    const item = (e) => `<div class="code-item"><span class="ci-n">${e.num}.</span> <span class="ci-c">${e.code.join("-")}</span><div class="ci-a">➡ ${answer ? `<b>${esc(e.word)}</b>` : e.word.split("").map(() => "<span class='sl'></span>").join("")}${e.meaning ? ` <span class="ci-m">(${esc(e.meaning)})</span>` : ""}</div></div>`;
+    const item = (e) => `<div class="code-item"><span class="ci-n">${e.seq}.</span> <span class="ci-c">${e.code.join("-")}</span><div class="ci-a">➡ ${e.word.split("").map(() => "<span class='sl'></span>").join("")}${e.meaning ? ` <span class="ci-m">(${esc(e.meaning)})</span>` : ""}</div></div>`;
     const [a, b] = halves(game.easy);
-    const hard = game.hard.map((h, i) => `<div class="code-item hard"><span class="ci-n">${i + 1}.</span> ${h.words.map((w) => `<span class="ci-c">( ${w.code.join("-")} )</span>`).join(" ")}<div class="ci-a">➡ ${answer ? `<b>${esc(h.phrase.toUpperCase())}</b>` : h.words.map((w) => w.word.split("").map(() => "<span class='sl'></span>").join("")).join("<span class='gap'></span>")}</div></div>`).join("");
-    return `<div class="g-secret">${keyTable}<div class="sub">[ 단어 ] 번호는 가사 빈칸 번호와 같습니다.</div><div class="two-col"><div>${a.map(item).join("")}</div><div>${b.map(item).join("")}</div></div>${hard ? `<div class="sub">[ 도전 ] 가사 속 구절</div>${hard}` : ""}</div>`;
+    const hard = game.hard.map((h, i) => `<div class="code-item hard"><span class="ci-n">${i + 1}.</span> ${h.words.map((w) => `<span class="ci-c">( ${w.code.join("-")} )</span>`).join(" ")}<div class="ci-a">➡ ${h.words.map((w) => w.word.split("").map(() => "<span class='sl'></span>").join("")).join("<span class='gap'></span>")}</div></div>`).join("");
+    return `<div class="g-secret">${keyTable}<div class="sub">[ 단어 ]</div><div class="two-col"><div>${a.map(item).join("")}</div><div>${b.map(item).join("")}</div></div>${hard ? `<div class="sub">[ 도전 ] 가사 속 구절</div>${hard}` : ""}</div>`;
   }
   const isMissing = game.type === "missing";
-  const ordered = isMissing && game.phrase;
-  const head = `<thead><tr>${ordered ? '<th class="n">순서</th>' : ""}<th class="n">No</th><th>${isMissing ? "단어" : "섞인 철자"}</th><th>뜻</th><th class="w">${isMissing ? "빠진 철자" : "정답"}</th></tr></thead>`;
-  const row = (it) => `<tr>${ordered ? `<td class="n o">${it.order}</td>` : ""}<td class="n">${it.num}</td><td class="mono">${isMissing ? (answer ? esc(it.word) : esc(it.shown)) : esc(it.shuffled)}</td><td>${esc(it.meaning || "")}</td><td class="w${answer ? " a" : ""}">${answer ? esc(isMissing ? it.missing : it.word) : ""}</td></tr>`;
+  if (answer) {
+    const items = game.items.map((it) => `<div><span class="an">${it.seq}.</span> ${isMissing ? missingWordHTML(it, true) : `<b>${esc(it.word)}</b>`}</div>`).join("");
+    const phrase = isMissing && game.phrase ? `<div class="wide"><span class="an">비밀 구절</span> <b class="red">${esc(game.phrase)}</b></div>` : "";
+    return `<div class="ans-grid">${items}${phrase}</div>`;
+  }
+  const head = `<thead><tr><th class="n">No</th><th>${isMissing ? "단어 (빈칸에 철자 쓰기)" : "섞인 철자"}</th><th>뜻</th>${isMissing ? "" : '<th class="w">정답</th>'}</tr></thead>`;
+  const row = (it) => `<tr><td class="n">${it.seq}</td><td class="mono">${isMissing ? missingWordHTML(it, false) : esc(it.shuffled)}</td><td>${esc(it.meaning || "")}</td>${isMissing ? "" : '<td class="w"></td>'}</tr>`;
   const [a, b] = halves(game.items);
-  const colg = ordered ? '<col style="width:9%"><col style="width:9%"><col style="width:33%"><col style="width:25%"><col>' : '<col style="width:9%"><col style="width:36%"><col style="width:25%"><col>';
+  const colg = isMissing ? '<col style="width:12%"><col style="width:48%"><col>' : '<col style="width:11%"><col style="width:36%"><col style="width:26%"><col>';
   const tbl = (rows) => `<table class="ws-list"><colgroup>${colg}</colgroup>${head}<tbody>${rows.map(row).join("")}</tbody></table>`;
   let phraseBox = "";
-  if (ordered) {
+  if (isMissing && game.phrase) {
     let k = 0;
-    const boxes = game.phraseWords.map((n) => `<span class="pw">${Array.from({ length: n }, () => { const it = game.items[k++]; return `<span class="pb"><i>${it.order}</i>${answer ? it.missing : ""}</span>`; }).join("")}</span>`).join("");
-    phraseBox = `<div class="phrase-box"><div class="sub">[ 비밀 구절 ] 빠진 철자를 <b>순서</b>대로 모아 가사 속 구절을 완성하세요.</div><div class="pbs">${boxes}</div>${answer ? `<div class="pa">정답: <b>${esc(game.phrase)}</b></div>` : '<div class="pa">구절: ________________________________</div>'}</div>`;
+    const boxes = game.phraseWords.map((n) => `<span class="pw">${Array.from({ length: n }, () => { const it = game.items[k++]; return `<span class="pb"><i>${it.seq}</i></span>`; }).join("")}</span>`).join("");
+    phraseBox = `<div class="phrase-box"><div class="sub">[ 비밀 구절 ] 빠진 철자를 번호 순서대로 모아 가사 속 구절을 완성하세요.</div><div class="pbs">${boxes}</div><div class="pa">구절: ________________________________</div></div>`;
   }
   return `<div class="two-col">${tbl(a)}${b.length ? tbl(b) : "<div></div>"}</div>${phraseBox}`;
 }
 
-export function renderPage2(ws) {
+export function renderPage2(ws, { measure = false } = {}) {
   const game = gameData(ws);
   const gt = GAME_TYPES[ws.options.game];
   const guide = ws.options.vocabMode === "word" ? "단어의 뜻을 빈칸에 적어 보세요." : ws.options.vocabMode === "meaning" ? "뜻을 보고 알맞은 단어를 적어 보세요." : "빈칸에 알맞은 단어 또는 뜻을 적어 보세요.";
-  return `<section class="ws-page p2" style="${pageStyle(ws)}">
+  return `<section class="ws-page p2" style="${pageStyle(ws, measure, "p2")}">
     <div class="ws-mini-head"><span>${esc(ws.song.title)} · ${esc(ws.song.artist)}</span><span>(&nbsp;&nbsp;&nbsp;&nbsp;)학년 (&nbsp;&nbsp;&nbsp;&nbsp;)반 이름 (&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;)</span></div>
     <h3 class="part">Part 1. Vocabulary Check</h3>
     <p class="guide">${guide} (번호는 가사 빈칸 번호와 같습니다.)</p>
     ${vocabTableHTML(ws, false)}
     <h3 class="part">Part 2. ${esc(gt.name)}</h3>
     <p class="guide">${esc(gt.guide)}</p>
-    ${gameHTML(ws, game, false)}
+    ${gameHTML(ws, game, false, pageFont(ws, "p2"))}
   </section>`;
 }
 
-export function renderAnswerPages(ws) {
+export function renderPage3(ws, { measure = false } = {}) {
   const v = vocabList(ws);
   const game = gameData(ws);
-  const map = blanksMap(ws);
   const lyricAns = `<table class="ws-ans"><tbody>${threeColumnRows(v).map((r) => `<tr>${r.map((it) => it ? `<td class="n">${it.num})</td><td>${esc(it.answer)}</td>` : '<td class="n"></td><td></td>').join("")}</tr>`).join("")}</tbody></table>`;
-  return `<section class="ws-page p3" style="${pageStyle(ws)}">
+  return `<section class="ws-page p3" style="${pageStyle(ws, measure, "p3")}">
     <div class="ws-mini-head"><span>[Answer Key] ${esc(ws.song.title)} · ${esc(ws.song.artist)}</span><span>교사용</span></div>
     <h3 class="part">가사 빈칸 정답</h3>
     ${lyricAns}
     <h3 class="part">Part 1. Vocabulary Check 정답</h3>
     ${vocabTableHTML(ws, true)}
     <h3 class="part">Part 2. ${esc(GAME_TYPES[ws.options.game].name)} 정답</h3>
-    ${gameHTML(ws, game, true)}
-  </section>
-  <section class="ws-page p4" style="${pageStyle(ws)}">
+    ${gameHTML(ws, game, true, pageFont(ws, "p3"))}
+  </section>`;
+}
+
+export function renderPage4(ws, { measure = false } = {}) {
+  const map = blanksMap(ws);
+  return `<section class="ws-page p4" style="${pageStyle(ws, measure, "p4")}">
     <div class="ws-mini-head"><span>[Answer Key] 정답이 표시된 가사</span><span>교사용</span></div>
     <div class="ws-lyrics">${ws.lines.map((l) => renderLineHTML(ws, l, "answer", map)).join("")}</div>
   </section>`;
+}
+
+export function renderAnswerPages(ws) {
+  return renderPage3(ws) + renderPage4(ws);
 }
 
 export function renderAllPages(ws, qr) {
